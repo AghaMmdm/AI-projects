@@ -2,7 +2,7 @@
 
 This project uses the **Fruit Images Dataset**  
 Dataset source:  
-👉 [https://github.com/Horea94/Fruit-Images-Dataset?utm_source=chatgpt.com]
+👉 [https://github.com/Horea94/Fruit-Images-Dataset]
 
 ---
 
