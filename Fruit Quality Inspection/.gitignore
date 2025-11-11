@@ -1,0 +1,24 @@
+# Ignore dataset folders and large files
+data/Fruit-Images-Dataset/
+*.zip
+*.rar
+*.7z
+*.tar
+*.tar.gz
+
+# Jupyter temporary files
+.ipynb_checkpoints/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment files
+.env
+venv/
+.venv/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
