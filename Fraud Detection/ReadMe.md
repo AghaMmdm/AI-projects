@@ -19,7 +19,9 @@ The dataset used is the **Kaggle Credit Card Fraud Detection** dataset containin
 
 ### 2. Overcoming Extreme Imbalance
 Instead of distorting the feature space with synthetic data generation (such as SMOTE/SMOTEENN) which led to high False Positive rates during testing, this architecture leverages the native cost-sensitive learning of gradient boosted trees via dynamically computed class weights:
-$$\text{scale\_pos\_weight} = \frac{\text{Total Negative Samples}}{\text{Total Positive Samples}}$$
+$$
+\text{scale\_pos\_weight} = \frac{\text{Total Negative Samples}}{\text{Total Positive Samples}}
+$$
 
 ### 3. Hyperparameter Tuning via Optuna
 Rather than optimizing for generic ROC-AUC, an automated **Optuna** study was constructed to directly maximize **PR-AUC (Average Precision)**. This forces the optimizer to focus exclusively on the minority class performance, avoiding the "Imbalance Trap."
@@ -40,4 +42,4 @@ In production fraud detection, the default $0.5$ classification threshold is rar
 ## 🔮 Model Explainability (SHAP Interpretation)
 To eliminate the "black-box" nature of Gradient Boosting, **SHAP (SHapley Additive exPlanations)** was integrated. 
 * The post-training analysis explicitly shows that latent features **V14**, **V4**, and **V12** hold the highest predictive power and global importance when evaluating a transaction's risk profile.
-*(Add your SHAP summary plot image here)*
+<img width="599" height="453" alt="image" src="https://github.com/user-attachments/assets/e6ace591-c2e1-4955-a27b-76d80be7c202" />
