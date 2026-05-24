@@ -46,6 +46,6 @@ Built a vectorized backtesting engine using `pandas` and `numpy` to calculate:
 ### Dataset Note
 
 Due to GitHub storage limits, the raw 1-minute Bitcoin historical data is not included in this repository.
-Download the dataset from Kaggle: [Bitcoin Historical Data](https://www.kaggle.com/datasets/imranbukhari/comprehensive-btcusd-1h-data).
+Download the dataset from Kaggle: [Bitcoin Historical Data](https://www.kaggle.com/datasets/swaptr/bitcoin-historical-data).
 Place the CSV file in the /Data folder.
 Run the main.ipynb notebook from top to bottom.

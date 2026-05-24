@@ -1,1 +1,1 @@
-https://www.kaggle.com/datasets/imranbukhari/comprehensive-btcusd-1h-data
+https://www.kaggle.com/datasets/swaptr/bitcoin-historical-data
