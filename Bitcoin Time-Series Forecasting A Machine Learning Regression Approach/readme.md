@@ -6,16 +6,16 @@ A production-grade Quantitative Trading pipeline that leverages Machine Learning
 Unlike traditional classification models that predict simple "up/down" movements, this project models the exact **percentage returns** of Bitcoin 4-hour candles. By applying a custom trading logic over the model's continuous predictions, the strategy successfully generated substantial alpha during a bearish market phase.
 
 ## 📊 Backtest Performance & Results
-The model's predictions were fed into a custom-built backtesting engine simulating real-world conditions (including a 0.2% threshold to account for exchange fees and market noise).
+The model's predictions were fed into a custom-built backtesting engine simulating real-world conditions (including a 0.1% threshold to account for exchange fees and market noise).
 
 **Out-of-Sample Performance:**
 | Metric | Result |
 | :--- | :--- |
 | **Total Market Return (Buy & Hold)** | `-34.26%` |
-| **Total Strategy Return (XGBoost)** | **`+59.43%`** |
-| **Total Trades Executed** | `335` |
-| **Win Rate** | `51.94%` |
-| **Maximum Drawdown** | `-23.24%` |
+| **Total Strategy Return (XGBoost)** | **`+64.60%`** |
+| **Total Trades Executed** | `261` |
+| **Win Rate** | `56.32%` |
+| **Maximum Drawdown** | `-20.25%` |
 
 *Conclusion:* The ML strategy effectively hedged against market downturns, outperforming a simple Buy & Hold strategy by over 93% while maintaining a highly controlled maximum drawdown.
 
