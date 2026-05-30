@@ -3,18 +3,19 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
-from sklearn.linear_model import LogisticRegression, LinearRegression
+from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.cluster import KMeans
 from sklearn.metrics import accuracy_score, mean_squared_error, silhouette_score
+import optuna
 import warnings
 
-# Suppress annoying warnings
+# Suppress warnings and Optuna logs for a cleaner CLI
 warnings.filterwarnings('ignore')
+optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 def preprocess_data(df, target_col=None, task_type="classification"):
-    print("\n[1/4] Preprocessing data (handling missing values and encoding)...")
+    print("\n[1/4] Preprocessing data...")
     
-    # 1. Handle missing values
     for col in df.columns:
         if df[col].isnull().sum() > 0:
             if df[col].dtype == 'object':
@@ -22,18 +23,14 @@ def preprocess_data(df, target_col=None, task_type="classification"):
             else:
                 df[col] = df[col].fillna(df[col].mean())
                 
-    # 2. Separate Features (X) and Target (y) if supervised
     if task_type in ["classification", "regression"]:
         if target_col not in df.columns:
-            raise KeyError(f"Target column '{target_col}' not found in dataset.")
+            raise KeyError(f"Target column '{target_col}' not found.")
             
         X = df.drop(columns=[target_col])
         y = df[target_col]
-        
-        # One-Hot Encoding for categorical features in X
         X = pd.get_dummies(X, drop_first=True)
         
-        # Handle labels for Classification vs Regression
         classes = None
         if task_type == "classification":
             label_encoder = LabelEncoder()
@@ -43,9 +40,68 @@ def preprocess_data(df, target_col=None, task_type="classification"):
         return X, y, classes
         
     elif task_type == "unsupervised":
-        # No target column for unsupervised learning
         X = pd.get_dummies(df, drop_first=True)
         return X, None, None
+
+# ==========================================
+# Optuna Tuning Functions
+# ==========================================
+def tune_classification_models(X_train, X_test, y_train, y_test, n_trials=30):
+    print(f"      -> Running Optuna Tuning ({n_trials} trials per model)...")
+    
+    # 1. Tune Decision Tree
+    def obj_dt(trial):
+        # Constrain max_depth for TinyML (RAM limits)
+        max_depth = trial.suggest_int('max_depth', 3, 10)
+        min_samples_split = trial.suggest_int('min_samples_split', 2, 10)
+        clf = DecisionTreeClassifier(max_depth=max_depth, min_samples_split=min_samples_split, random_state=42)
+        clf.fit(X_train, y_train)
+        return accuracy_score(y_test, clf.predict(X_test))
+        
+    study_dt = optuna.create_study(direction='maximize')
+    study_dt.optimize(obj_dt, n_trials=n_trials)
+    best_dt = DecisionTreeClassifier(**study_dt.best_params, random_state=42).fit(X_train, y_train)
+    
+    # 2. Tune Logistic Regression
+    def obj_lr(trial):
+        C = trial.suggest_float('C', 1e-3, 1e2, log=True)
+        clf = LogisticRegression(C=C, max_iter=200, random_state=42)
+        clf.fit(X_train, y_train)
+        return accuracy_score(y_test, clf.predict(X_test))
+        
+    study_lr = optuna.create_study(direction='maximize')
+    study_lr.optimize(obj_lr, n_trials=n_trials)
+    best_lr = LogisticRegression(**study_lr.best_params, max_iter=200, random_state=42).fit(X_train, y_train)
+    
+    return best_dt, study_dt.best_value, best_lr, study_lr.best_value
+
+def tune_regression_models(X_train, X_test, y_train, y_test, n_trials=30):
+    print(f"      -> Running Optuna Tuning ({n_trials} trials per model)...")
+    
+    # 1. Tune Decision Tree Regressor
+    def obj_dt(trial):
+        max_depth = trial.suggest_int('max_depth', 3, 10)
+        min_samples_split = trial.suggest_int('min_samples_split', 2, 10)
+        reg = DecisionTreeRegressor(max_depth=max_depth, min_samples_split=min_samples_split, random_state=42)
+        reg.fit(X_train, y_train)
+        return mean_squared_error(y_test, reg.predict(X_test))
+        
+    study_dt = optuna.create_study(direction='minimize') # Minimize MSE
+    study_dt.optimize(obj_dt, n_trials=n_trials)
+    best_dt = DecisionTreeRegressor(**study_dt.best_params, random_state=42).fit(X_train, y_train)
+    
+    # 2. Tune Ridge Regression (Linear Model with L2 Regularization)
+    def obj_ridge(trial):
+        alpha = trial.suggest_float('alpha', 1e-3, 1e3, log=True)
+        reg = Ridge(alpha=alpha, random_state=42)
+        reg.fit(X_train, y_train)
+        return mean_squared_error(y_test, reg.predict(X_test))
+        
+    study_ridge = optuna.create_study(direction='minimize') # Minimize MSE
+    study_ridge.optimize(obj_ridge, n_trials=n_trials)
+    best_ridge = Ridge(**study_ridge.best_params, random_state=42).fit(X_train, y_train)
+    
+    return best_dt, study_dt.best_value, best_ridge, study_ridge.best_value
 
 # ==========================================
 # TinyML Export Functions
@@ -58,7 +114,7 @@ def export_decision_tree(model, filename="tinyml_model.py", is_classifier=True, 
     right = tree.children_right.tolist()
     
     with open(filename, "w", encoding="utf-8") as f:
-        f.write("# Auto-Generated by TinyML AutoML\n")
+        f.write("# Auto-Generated by TinyML AutoML with Optuna\n")
         f.write(f"model_type = 'decision_tree_{'classifier' if is_classifier else 'regressor'}'\n")
         f.write(f"features = {features}\n")
         f.write(f"thresholds = {thresholds}\n")
@@ -72,7 +128,6 @@ def export_decision_tree(model, filename="tinyml_model.py", is_classifier=True, 
             f.write(f"unique_classes = {unique_classes}\n")
             f.write(f"class_indices = {class_indices}\n")
         else:
-            # For regression, we just need the value at each node
             values = [round(float(v[0][0]), 4) for v in tree.value]
             f.write(f"values = {values}\n")
 
@@ -81,7 +136,7 @@ def export_linear_model(model, filename="tinyml_model.py", is_classifier=True, c
     intercept = round(float(model.intercept_[0] if is_classifier else model.intercept_), 4)
     
     with open(filename, "w", encoding="utf-8") as f:
-        f.write("# Auto-Generated by TinyML AutoML\n")
+        f.write("# Auto-Generated by TinyML AutoML with Optuna\n")
         f.write(f"model_type = '{'logistic_regression' if is_classifier else 'linear_regression'}'\n")
         f.write(f"weights = {weights}\n")
         f.write(f"intercept = {intercept}\n")
@@ -101,7 +156,7 @@ def export_kmeans(model, filename="tinyml_model.py"):
 # ==========================================
 if __name__ == "__main__":
     print("=== Welcome to TinyML AutoML Platform ===")
-    csv_path = input("Please enter the path to your CSV file (e.g., data.csv): ")
+    csv_path = input("Please enter the path to your CSV file: ")
     
     print("\nSelect the Machine Learning Task Type:")
     print("1. Classification (Supervised - Predict a category/class)")
@@ -116,92 +171,65 @@ if __name__ == "__main__":
         if task_choice == '1':
             target_column = input("Enter the target column name (Label): ")
             X, y, classes = preprocess_data(df, target_column, "classification")
-            
-            print("\n[2/4] Splitting data into Train and Test sets...")
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
             
-            print("\n[3/4] Training models: Decision Tree vs Logistic Regression...")
-            dt = DecisionTreeClassifier(max_depth=6, random_state=42)
-            dt.fit(X_train, y_train)
-            dt_acc = accuracy_score(y_test, dt.predict(X_test))
+            print("\n[2/4] Optimizing Hyperparameters with Optuna...")
+            best_dt, dt_acc, best_lr, lr_acc = tune_classification_models(X_train, X_test, y_train, y_test)
             
-            lr = LogisticRegression(max_iter=200, random_state=42)
-            lr.fit(X_train, y_train)
-            lr_acc = accuracy_score(y_test, lr.predict(X_test))
-            
-            print(f"  -> Decision Tree Accuracy: {dt_acc * 100:.2f}%")
-            print(f"  -> Logistic Regression Accuracy: {lr_acc * 100:.2f}%")
+            print("\n[3/4] Optimization Results:")
+            print(f"  -> Optimized Decision Tree Accuracy: {dt_acc * 100:.2f}%")
+            print(f"  -> Optimized Logistic Regression Accuracy: {lr_acc * 100:.2f}%")
             
             print("\n[4/4] Exporting the best classification model...")
             if dt_acc >= lr_acc:
-                export_decision_tree(dt, is_classifier=True, classes=classes)
+                export_decision_tree(best_dt, is_classifier=True, classes=classes)
                 print("🏆 Exported: Decision Tree Classifier")
             else:
-                export_linear_model(lr, is_classifier=True, classes=classes)
+                export_linear_model(best_lr, is_classifier=True, classes=classes)
                 print("🏆 Exported: Logistic Regression")
 
         elif task_choice == '2':
             target_column = input("Enter the target column name (Label): ")
             X, y, _ = preprocess_data(df, target_column, "regression")
-            
-            print("\n[2/4] Splitting data into Train and Test sets...")
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
             
-            print("\n[3/4] Training models: Decision Tree Regressor vs Linear Regression...")
-            # Note: For regression, Mean Squared Error (MSE) is used. Lower is better!
-            dtr = DecisionTreeRegressor(max_depth=6, random_state=42)
-            dtr.fit(X_train, y_train)
-            dtr_mse = mean_squared_error(y_test, dtr.predict(X_test))
+            print("\n[2/4] Optimizing Hyperparameters with Optuna...")
+            best_dt, dt_mse, best_ridge, ridge_mse = tune_regression_models(X_train, X_test, y_train, y_test)
             
-            lin_reg = LinearRegression()
-            lin_reg.fit(X_train, y_train)
-            lin_reg_mse = mean_squared_error(y_test, lin_reg.predict(X_test))
-            
-            print(f"  -> Decision Tree MSE: {dtr_mse:.4f}")
-            print(f"  -> Linear Regression MSE: {lin_reg_mse:.4f}")
+            print("\n[3/4] Optimization Results (Lower MSE is better):")
+            print(f"  -> Optimized Decision Tree MSE: {dt_mse:.4f}")
+            print(f"  -> Optimized Linear (Ridge) Regression MSE: {ridge_mse:.4f}")
             
             print("\n[4/4] Exporting the best regression model...")
-            if dtr_mse <= lin_reg_mse:  # Lower MSE is better
-                export_decision_tree(dtr, is_classifier=False)
+            if dt_mse <= ridge_mse:
+                export_decision_tree(best_dt, is_classifier=False)
                 print("🏆 Exported: Decision Tree Regressor")
             else:
-                export_linear_model(lin_reg, is_classifier=False)
+                export_linear_model(best_ridge, is_classifier=False)
                 print("🏆 Exported: Linear Regression")
 
         elif task_choice == '3':
+            # Unsupervised flow remains unchanged (Silhouette Score logic is already an optimizer)
             X, _, _ = preprocess_data(df, task_type="unsupervised")
+            print("\n[2/4] Training model: K-Means Clustering...")
+            best_k, best_score, best_model = 2, -1, None
             
-            print("\n[2/4] Unsupervised Learning does not require Train/Test splitting.")
-            print("\n[3/4] Training model: K-Means Clustering...")
-            
-            # Using Silhouette Score to find the best 'K' (number of clusters) automatically
-            best_k = 2
-            best_score = -1
-            best_model = None
-            
-            print("  -> Testing different cluster counts (K=2 to K=5)...")
             for k in range(2, min(6, len(X))):
                 kmeans = KMeans(n_clusters=k, random_state=42)
                 labels = kmeans.fit_predict(X)
                 score = silhouette_score(X, labels)
-                print(f"     K={k} | Silhouette Score: {score:.4f}")
-                
                 if score > best_score:
-                    best_score = score
-                    best_k = k
-                    best_model = kmeans
+                    best_score, best_k, best_model = score, k, kmeans
                     
-            print(f"\n  -> Best K found: {best_k} (Score: {best_score:.4f})")
-            
-            print("\n[4/4] Exporting K-Means Centroids...")
+            print(f"  -> Best K found: {best_k} (Silhouette Score: {best_score:.4f})")
+            print("\n[3/4] Exporting K-Means Centroids...")
             export_kmeans(best_model)
             print("🏆 Exported: K-Means Clustering Model")
 
         else:
-            print("❌ Invalid selection. Please restart and choose 1, 2, or 3.")
-            exit()
+            print("❌ Invalid selection. Please restart.")
 
-        print("\n✅ Success! 'tinyml_model.py' has been generated for edge deployment.")
+        print("\n✅ Success! 'tinyml_model.py' is ready for your Pyboard.")
 
     except Exception as e:
         print(f"❌ Error during execution: {e}")
