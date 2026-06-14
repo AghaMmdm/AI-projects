@@ -15,7 +15,7 @@ from sklearn.metrics import accuracy_score, mean_squared_error, silhouette_score
 import optuna
 import warnings
 
-# Suppress warnings and Optuna logs for cleaner UI output
+# Suppress warnings and Optuna logs for a cleaner UI output
 warnings.filterwarnings('ignore')
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -58,18 +58,19 @@ def preprocess_data(df, target_col=None, task_type="classification"):
 def tune_classification_models(X_train, X_test, y_train, y_test, n_trials=30):
     print(f"      -> Running Optuna Tuning ({n_trials} trials per model)...")
     
-    # 1. Decision Tree
+    # 1. Decision Tree Tuning
     def obj_dt(trial):
         max_depth = trial.suggest_int('max_depth', 3, 10)
         min_samples_split = trial.suggest_int('min_samples_split', 2, 10)
-        clf = DecisionTreeClassifier(max_depth=max_depth, min_samples_split=min_samples_split, random_state=42)
+        criterion = trial.suggest_categorical('criterion', ['gini', 'entropy'])
+        clf = DecisionTreeClassifier(max_depth=max_depth, min_samples_split=min_samples_split, criterion=criterion, random_state=42)
         clf.fit(X_train, y_train)
         return accuracy_score(y_test, clf.predict(X_test))
     study_dt = optuna.create_study(direction='maximize')
     study_dt.optimize(obj_dt, n_trials=n_trials)
     best_dt = DecisionTreeClassifier(**study_dt.best_params, random_state=42).fit(X_train, y_train)
     
-    # 2. Logistic Regression
+    # 2. Logistic Regression Tuning
     def obj_lr(trial):
         C = trial.suggest_float('C', 1e-3, 1e2, log=True)
         clf = LogisticRegression(C=C, max_iter=200, random_state=42)
@@ -79,11 +80,12 @@ def tune_classification_models(X_train, X_test, y_train, y_test, n_trials=30):
     study_lr.optimize(obj_lr, n_trials=n_trials)
     best_lr = LogisticRegression(**study_lr.best_params, max_iter=200, random_state=42).fit(X_train, y_train)
 
-    # 3. Micro Random Forest (Constrained for TinyML)
+    # 3. Micro Random Forest Tuning
     def obj_rf(trial):
         max_depth = trial.suggest_int('max_depth', 3, 6)
         n_estimators = trial.suggest_int('n_estimators', 3, 5)
-        clf = RandomForestClassifier(n_estimators=n_estimators, max_depth=max_depth, random_state=42)
+        criterion = trial.suggest_categorical('criterion', ['gini', 'entropy'])
+        clf = RandomForestClassifier(n_estimators=n_estimators, max_depth=max_depth, criterion=criterion, random_state=42)
         clf.fit(X_train, y_train)
         return accuracy_score(y_test, clf.predict(X_test))
     study_rf = optuna.create_study(direction='maximize')
@@ -104,7 +106,7 @@ def tune_classification_models(X_train, X_test, y_train, y_test, n_trials=30):
 def tune_regression_models(X_train, X_test, y_train, y_test, n_trials=30):
     print(f"      -> Running Optuna Tuning ({n_trials} trials per model)...")
     
-    # 1. Decision Tree Regressor
+    # 1. Decision Tree Regressor Tuning
     def obj_dt(trial):
         max_depth = trial.suggest_int('max_depth', 3, 10)
         min_samples_split = trial.suggest_int('min_samples_split', 2, 10)
@@ -115,7 +117,7 @@ def tune_regression_models(X_train, X_test, y_train, y_test, n_trials=30):
     study_dt.optimize(obj_dt, n_trials=n_trials)
     best_dt = DecisionTreeRegressor(**study_dt.best_params, random_state=42).fit(X_train, y_train)
     
-    # 2. Ridge Regression
+    # 2. Ridge Regression Tuning
     def obj_ridge(trial):
         alpha = trial.suggest_float('alpha', 1e-3, 1e3, log=True)
         reg = Ridge(alpha=alpha, random_state=42)
@@ -125,7 +127,7 @@ def tune_regression_models(X_train, X_test, y_train, y_test, n_trials=30):
     study_ridge.optimize(obj_ridge, n_trials=n_trials)
     best_ridge = Ridge(**study_ridge.best_params, random_state=42).fit(X_train, y_train)
 
-    # 3. Micro Random Forest Regressor
+    # 3. Micro Random Forest Regressor Tuning
     def obj_rf(trial):
         max_depth = trial.suggest_int('max_depth', 3, 6)
         n_estimators = trial.suggest_int('n_estimators', 3, 5)
@@ -143,34 +145,44 @@ def tune_regression_models(X_train, X_test, y_train, y_test, n_trials=30):
     }
 
 # ==========================================
-# MANUAL MODE: Train with user-defined Hyperparameters
+# MANUAL MODE: Train with Extended Hyperparameters
 # ==========================================
 def train_manual_classification_models(X_train, X_test, y_train, y_test, params):
-    print("      -> Training models with manual hyperparameters...")
+    print("      -> Training models with manual extended hyperparameters...")
     
-    # Extract params with safe fallbacks
     dt_p = params.get('decision_tree', {})
     lr_p = params.get('logistic_regression', {})
     rf_p = params.get('random_forest', {})
     
+    # 1. Extended Decision Tree
     dt = DecisionTreeClassifier(
         max_depth=dt_p.get('max_depth', 5), 
-        min_samples_split=dt_p.get('min_samples_split', 2), 
+        min_samples_split=dt_p.get('min_samples_split', 2),
+        min_samples_leaf=dt_p.get('min_samples_leaf', 1),
+        criterion=dt_p.get('criterion', 'gini'),
         random_state=42
     ).fit(X_train, y_train)
     
+    # 2. Extended Logistic Regression
     lr = LogisticRegression(
-        C=lr_p.get('C', 1.0), 
+        C=lr_p.get('C', 1.0),
+        penalty=lr_p.get('penalty', 'l2'),
+        solver=lr_p.get('solver', 'lbfgs'),
         max_iter=200, 
         random_state=42
     ).fit(X_train, y_train)
     
+    # 3. Extended Micro Random Forest
     rf = RandomForestClassifier(
         n_estimators=rf_p.get('n_estimators', 5), 
-        max_depth=rf_p.get('max_depth', 5), 
+        max_depth=rf_p.get('max_depth', 5),
+        min_samples_split=rf_p.get('min_samples_split', 2),
+        min_samples_leaf=rf_p.get('min_samples_leaf', 1),
+        criterion=rf_p.get('criterion', 'gini'),
         random_state=42
     ).fit(X_train, y_train)
     
+    # 4. Naive Bayes (Parameters are purely dataset-driven)
     gnb = GaussianNB().fit(X_train, y_train)
 
     return {
@@ -181,26 +193,33 @@ def train_manual_classification_models(X_train, X_test, y_train, y_test, params)
     }
 
 def train_manual_regression_models(X_train, X_test, y_train, y_test, params):
-    print("      -> Training models with manual hyperparameters...")
+    print("      -> Training models with manual extended hyperparameters...")
     
     dt_p = params.get('decision_tree', {})
     ridge_p = params.get('ridge_regression', {})
     rf_p = params.get('random_forest', {})
     
+    # 1. Extended Decision Tree Regressor
     dt = DecisionTreeRegressor(
         max_depth=dt_p.get('max_depth', 5), 
-        min_samples_split=dt_p.get('min_samples_split', 2), 
+        min_samples_split=dt_p.get('min_samples_split', 2),
+        min_samples_leaf=dt_p.get('min_samples_leaf', 1),
         random_state=42
     ).fit(X_train, y_train)
     
+    # 2. Extended Ridge Regression
     ridge = Ridge(
-        alpha=ridge_p.get('alpha', 1.0), 
+        alpha=ridge_p.get('alpha', 1.0),
+        solver=ridge_p.get('solver', 'auto'),
         random_state=42
     ).fit(X_train, y_train)
     
+    # 3. Extended Random Forest Regressor
     rf = RandomForestRegressor(
         n_estimators=rf_p.get('n_estimators', 5), 
-        max_depth=rf_p.get('max_depth', 5), 
+        max_depth=rf_p.get('max_depth', 5),
+        min_samples_split=rf_p.get('min_samples_split', 2),
+        min_samples_leaf=rf_p.get('min_samples_leaf', 1),
         random_state=42
     ).fit(X_train, y_train)
 
@@ -328,10 +347,10 @@ def export_kmeans(model, filename="tinyml_model.py"):
         f.write("n_clusters = len(centroids)\n")
 
 # ==========================================
-# Main Application CLI
+# Main Application Entry Point
 # ==========================================
 if __name__ == "__main__":
-    # Setup Argument Parser to receive the JSON configuration file
+    # Handle parsing of the JSON config path passed via sys.argv from Qt/CLI
     parser = argparse.ArgumentParser(description="TinyML AutoML Engine")
     parser.add_argument("--config", required=True, help="Path to the JSON configuration file")
     args = parser.parse_args()
@@ -339,7 +358,7 @@ if __name__ == "__main__":
     print("=== Welcome to TinyML AutoML Platform ===")
     
     try:
-        # 1. Load JSON Configuration
+        # Load configuration data from JSON
         with open(args.config, 'r', encoding='utf-8') as file:
             config = json.load(file)
             
@@ -353,7 +372,7 @@ if __name__ == "__main__":
             raise FileNotFoundError(f"CSV file '{csv_path}' not found.")
             
         df = pd.read_csv(csv_path)
-        print(f"[*] Configuration Loaded. Mode: {exec_mode.upper()} | Task: {task_choice}")
+        print(f"[*] Configuration Loaded. Mode: {exec_mode.upper()} | Task Type: {task_choice}")
         
         # ---------------------------------------------
         # TASK 1: CLASSIFICATION
@@ -422,10 +441,13 @@ if __name__ == "__main__":
             print(f"\n[2/4] Training model: K-Means Clustering ({exec_mode.upper()} Mode)...")
             
             if exec_mode == "manual":
-                # Use provided clusters or default to 3
-                k = hyperparams.get('kmeans', {}).get('n_clusters', 3)
-                best_model = KMeans(n_clusters=k, random_state=42).fit(X)
-                print(f"  -> Trained with K={k} clusters based on manual settings.")
+                km_p = hyperparams.get('kmeans', {})
+                k = km_p.get('n_clusters', 3)
+                init_method = km_p.get('init', 'k-means++')
+                m_iter = km_p.get('max_iter', 300)
+                
+                best_model = KMeans(n_clusters=k, init=init_method, max_iter=m_iter, random_state=42).fit(X)
+                print(f"  -> Trained with K={k}, Init={init_method}, MaxIter={m_iter} (Manual Config).")
             else:
                 best_k, best_score, best_model = 2, -1, None
                 for k in range(2, min(6, len(X))):
@@ -447,19 +469,25 @@ if __name__ == "__main__":
             print(f"\n[2/4] Training model: Isolation Forest ({exec_mode.upper()} Mode)...")
             
             n_est = 5
+            max_feat = 1.0
+            contamination = 'auto'
+            
             if exec_mode == "manual":
-                n_est = hyperparams.get('isolation_forest', {}).get('n_estimators', 5)
+                if_p = hyperparams.get('isolation_forest', {})
+                n_est = if_p.get('n_estimators', 5)
+                max_feat = if_p.get('max_features', 1.0)
+                contamination = if_p.get('contamination', 'auto')
                 
-            iso_forest = IsolationForest(n_estimators=n_est, random_state=42)
+            iso_forest = IsolationForest(n_estimators=n_est, max_features=max_feat, contamination=contamination, random_state=42)
             iso_forest.fit(X)
             
-            print(f"  -> Isolation Forest trained successfully with {n_est} estimators.")
+            print(f"  -> Isolation Forest trained successfully (Trees={n_est}, MaxFeatures={max_feat}, Contamination={contamination}).")
             print("\n[3/4] Exporting Isolation Forest Model...")
             export_isolation_forest(iso_forest)
             print("🏆 Exported: Isolation Forest Model")
 
         else:
-            print("❌ Error: Invalid task type in JSON configuration.")
+            print("❌ Error: Invalid task type specified in JSON configuration.")
 
         print("\n✅ Success! 'tinyml_model.py' is ready for your Edge device.")
 
