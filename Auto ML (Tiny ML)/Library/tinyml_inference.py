@@ -25,6 +25,60 @@ class TinyMLPredictor:
         """
         self.model = model_module
         self.type = self.model.model_type
+        
+    def transform_input(self, raw_input):
+        """Preprocesses raw input data to match the model's training schema.
+        
+        Handles missing values (imputation) and dynamically expands categorical 
+        features using One-Hot Encoding logic without using Pandas or Numpy.
+
+        Args:
+            raw_input (dict or list): Unprocessed feature mappings from sensors.
+                Example dict: {"color_type": "dark", "R": None, "G": 125, "B": 255}
+                Example list: [None, 125, 255] (if order matches raw CSV columns)
+
+        Returns:
+            list: Cleaned, aligned numerical array ready for model computation.
+        """
+        # If input is a list, convert it to a dictionary mapping based on model features
+        if isinstance(raw_input, list):
+            # Fallback handling for pure list inputs (assumes matched index ordering)
+            # Impute missing items directly from metadata parameters
+            cleaned_list = []
+            for idx, val in enumerate(raw_input):
+                if val is None:
+                    # Fetch backup default values sequentially
+                    feature_keys = list(self.model.pipeline_impute.keys())
+                    val = self.model.pipeline_impute[feature_keys[idx]]
+                cleaned_list.append(val)
+            return cleaned_list
+
+        # Process standard rich Dictionary Inputs
+        # 1. Fill missing values using the compiled training mean/mode constants
+        imputed_data = {}
+        for feature_name, fallback_value in self.model.pipeline_impute.items():
+            user_val = raw_input.get(feature_name, None)
+            if user_val is None or user_val == "":
+                imputed_data[feature_name] = fallback_value
+            else:
+                imputed_data[feature_name] = user_val
+
+        # 2. Reconstruct the precise One-Hot Encoded feature vector layout
+        final_vector = []
+        for feature in self.model.pipeline_features:
+            # Check if this feature is a generated dummy column (contains '_')
+            if "_" in feature:
+                base_col, category = feature.split("_", 1)
+                if base_col in imputed_data:
+                    # Set 1 if categorical string matches, else 0
+                    final_vector.append(1 if str(imputed_data[base_col]) == category else 0)
+                else:
+                    final_vector.append(0)
+            else:
+                # Numerical plain feature
+                final_vector.append(float(imputed_data.get(feature, 0.0)))
+
+        return final_vector
 
     def predict(self, inputs):
         """Routes raw numerical features to the corresponding model prediction logic.

@@ -19,6 +19,13 @@ import warnings
 warnings.filterwarnings('ignore')
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
+# Global metadata dictionary to store preprocessing parameters for the edge device
+pipeline_metadata = {
+    "impute_values": {},      # Stores mean/mode for missing data handling
+    "categorical_modes": {},   # Tracks mode for categorical strings
+    "encoded_features": []     # Stores the exact order of final columns after One-Hot Encoding
+}
+
 # ==========================================
 # TinyML Resource Profiler Class
 # ==========================================
@@ -29,16 +36,10 @@ class TinyMLProfiler:
     """
     @staticmethod
     def profile_model(filename="tinyml_model.py"):
-        """
-        Reads the exported Python file and calculates structural complexity metrics.
-        """
         if not os.path.exists(filename):
             return
         
-        # Calculate Flash size directly from the file size
         flash_size_kb = os.path.getsize(filename) / 1024.0
-        
-        # Read file to analyze internal structures for RAM and Complexity estimation
         with open(filename, "r", encoding="utf-8") as f:
             content = f.read()
             
@@ -47,45 +48,31 @@ class TinyMLProfiler:
         print("="*60)
         print(f"  -> Flash Memory Footprint : {flash_size_kb:.2f} KB")
         
-        # Base overhead for MicroPython module tracking (approximate)
         estimated_ram_bytes = 512 
-        ops_complexity = ""
 
-        # 1. Profile Tree-Based Models (Decision Tree)
         if "decision_tree" in content:
-            # Count elements in the feature list to determine number of nodes
             try:
                 for line in content.split("\n"):
                     if line.startswith("features ="):
                         node_count = len(json.loads(line.split("=")[1].strip()))
-                        # Each node stores integers/floats (approx. 16 bytes per node in RAM matrices)
                         estimated_ram_bytes += node_count * 16
                         print(f"  -> Total Tree Nodes       : {node_count}")
                         print(f"  -> Max Execution Steps    : O(log2({node_count})) comparisons")
                         break
-            except Exception:
-                pass
+            except Exception: pass
 
-        # 2. Profile Linear Models (Regression / Logistic)
         elif "logistic_regression" in content or "linear_regression" in content:
             try:
                 for line in content.split("\n"):
                     if line.startswith("weights ="):
                         raw_weights = json.loads(line.split("=")[1].strip())
-                        # Check if weights matrix is 1D (binary) or 2D (multiclass)
-                        if isinstance(raw_weights[0], list):
-                            weight_count = len(raw_weights) * len(raw_weights[0])
-                        else:
-                            weight_count = len(raw_weights)
-                        
-                        estimated_ram_bytes += weight_count * 8 # 8 bytes per float64
+                        weight_count = len(raw_weights) * len(raw_weights[0]) if isinstance(raw_weights[0], list) else len(raw_weights)
+                        estimated_ram_bytes += weight_count * 8
                         print(f"  -> Total Model Weights    : {weight_count}")
                         print(f"  -> Compute Complexity     : {weight_count} MACs (Multiply-Accumulate)")
                         break
-            except Exception:
-                pass
+            except Exception: pass
 
-        # 3. Profile Ensemble Models (Random Forest / Isolation Forest)
         elif "random_forest" in content or "isolation_forest" in content:
             try:
                 for line in content.split("\n"):
@@ -98,10 +85,8 @@ class TinyMLProfiler:
                         print(f"  -> Total Combined Nodes   : {total_nodes}")
                         print(f"  -> Compute Complexity     : ~{tree_count} x Tree-Traversals")
                         break
-            except Exception:
-                pass
+            except Exception: pass
 
-        # 4. Profile Distance-Based Models (K-Means)
         elif "kmeans_clustering" in content:
             try:
                 for line in content.split("\n"):
@@ -113,8 +98,7 @@ class TinyMLProfiler:
                         print(f"  -> Cluster Centroids (K)  : {cluster_count}")
                         print(f"  -> Distance Computations  : {cluster_count * feature_count} Squared-Differences")
                         break
-            except Exception:
-                pass
+            except Exception: pass
 
         print(f"  -> Estimated RAM Occupancy: {estimated_ram_bytes / 1024.0:.2f} KB ({estimated_ram_bytes} Bytes)")
         print("="*60 + "\n")
@@ -122,27 +106,43 @@ class TinyMLProfiler:
 
 def preprocess_data(df, target_col=None, task_type="classification"):
     print("\n[1/4] Preprocessing data...")
-    for col in df.columns:
-        if df[col].isnull().sum() > 0:
-            if df[col].dtype == 'object':
-                df[col] = df[col].fillna(df[col].mode()[0])
-            else:
-                df[col] = df[col].fillna(df[col].mean())
+    global pipeline_metadata
+    
+    # Identify feature columns (exclude target)
+    feature_cols = [col for col in df.columns if col != target_col] if target_col else list(df.columns)
+    
+    # Calculate and store imputation mapping (mean/mode) for the pipeline metadata
+    for col in feature_cols:
+        if df[col].dtype == 'object':
+            fill_val = str(df[col].mode()[0])
+            pipeline_metadata["impute_values"][col] = fill_val
+            pipeline_metadata["categorical_modes"][col] = fill_val
+            df[col] = df[col].fillna(fill_val)
+        else:
+            fill_val = float(df[col].mean())
+            pipeline_metadata["impute_values"][col] = round(fill_val, 4)
+            df[col] = df[col].fillna(fill_val)
                 
     if task_type in ["classification", "regression"]:
         if target_col not in df.columns:
             raise KeyError(f"Target column '{target_col}' not found in the dataset.")
         X = df.drop(columns=[target_col])
         y = df[target_col]
+        
+        # Track expected feature layout after dummy expansion
         X = pd.get_dummies(X, drop_first=True)
+        pipeline_metadata["encoded_features"] = list(X.columns)
+        
         classes = None
         if task_type == "classification":
             label_encoder = LabelEncoder()
             y = label_encoder.fit_transform(y)
             classes = label_encoder.classes_
         return X, y, classes
+        
     elif task_type in ["unsupervised", "anomaly"]:
         X = pd.get_dummies(df, drop_first=True)
+        pipeline_metadata["encoded_features"] = list(X.columns)
         return X, None, None
 
 # ==========================================
@@ -266,53 +266,53 @@ def train_manual_regression_models(X_train, X_test, y_train, y_test, params):
 # ==========================================
 # TinyML Export Functions
 # ==========================================
+def inject_preprocessing_pipeline(f):
+    """Writes the embedded pipeline metadata dictionary directly into the exported file."""
+    f.write(f"pipeline_impute = {pipeline_metadata['impute_values']}\n")
+    f.write(f"pipeline_categorical_modes = {pipeline_metadata['categorical_modes']}\n")
+    f.write(f"pipeline_features = {pipeline_metadata['encoded_features']}\n\n")
+
 def export_decision_tree(model, filename="tinyml_model.py", is_classifier=True, classes=None):
     tree = model.tree_
-    features = tree.feature.tolist()
-    thresholds = [round(x, 4) for x in tree.threshold.tolist()]
-    left = tree.children_left.tolist()
-    right = tree.children_right.tolist()
-    
     with open(filename, "w", encoding="utf-8") as f:
         f.write("# Auto-Generated by TinyML AutoML Engine\n")
+        inject_preprocessing_pipeline(f)
         f.write(f"model_type = 'decision_tree_{'classifier' if is_classifier else 'regressor'}'\n")
-        f.write(f"features = {features}\n")
-        f.write(f"thresholds = {thresholds}\n")
-        f.write(f"left = {left}\n")
-        f.write(f"right = {right}\n")
+        f.write(f"features = {tree.feature.tolist()}\n")
+        f.write(f"thresholds = {[round(x, 4) for x in tree.threshold.tolist()]}\n")
+        f.write(f"left = {tree.children_left.tolist()}\n")
+        f.write(f"right = {tree.children_right.tolist()}\n")
         if is_classifier and classes is not None:
             node_classes = [str(classes[np.argmax(v)]) for v in tree.value]
             unique_classes = list(set(node_classes))
-            class_indices = [unique_classes.index(c) for c in node_classes]
             f.write(f"unique_classes = {unique_classes}\n")
-            f.write(f"class_indices = {class_indices}\n")
+            f.write(f"class_indices = {[unique_classes.index(c) for c in node_classes]}\n")
         else:
-            values = [round(float(v[0][0]), 4) for v in tree.value]
-            f.write(f"values = {values}\n")
+            f.write(f"values = {[round(float(v[0][0]), 4) for v in tree.value]}\n")
 
 def export_linear_model(model, filename="tinyml_model.py", is_classifier=True, classes=None):
     with open(filename, "w", encoding="utf-8") as f:
         f.write("# Auto-Generated by TinyML AutoML Engine\n")
+        inject_preprocessing_pipeline(f)
         if is_classifier:
             if len(classes) > 2:
                 f.write("model_type = 'logistic_regression_multiclass'\n")
-                weights = np.round(model.coef_, 4).tolist()
-                intercept = np.round(model.intercept_, 4).tolist()
+                f.write(f"weights = {np.round(model.coef_, 4).tolist()}\n")
+                f.write(f"intercept = {np.round(model.intercept_, 4).tolist()}\n")
             else:
                 f.write("model_type = 'logistic_regression_binary'\n")
-                weights = np.round(model.coef_[0], 4).tolist()
-                intercept = round(float(model.intercept_[0]), 4)
+                f.write(f"weights = {np.round(model.coef_[0], 4).tolist()}\n")
+                f.write(f"intercept = {round(float(model.intercept_[0]), 4)}\n")
             f.write(f"classes = {[str(c) for c in classes]}\n")
         else:
             f.write("model_type = 'linear_regression'\n")
-            weights = np.round(model.coef_, 4).tolist()
-            intercept = round(float(model.intercept_), 4)
-        f.write(f"weights = {weights}\n")
-        f.write(f"intercept = {intercept}\n")
+            f.write(f"weights = {np.round(model.coef_, 4).tolist()}\n")
+            f.write(f"intercept = {round(float(model.intercept_), 4)}\n")
 
 def export_gnb(model, filename="tinyml_model.py", classes=None):
     with open(filename, "w", encoding="utf-8") as f:
         f.write("# Auto-Generated by TinyML AutoML Engine\n")
+        inject_preprocessing_pipeline(f)
         f.write("model_type = 'gaussian_nb'\n")
         f.write(f"theta = {np.round(model.theta_, 4).tolist()}\n")
         f.write(f"var = {np.round(model.var_, 4).tolist()}\n")
@@ -334,6 +334,7 @@ def export_random_forest(model, filename="tinyml_model.py", is_classifier=True, 
             
     with open(filename, "w", encoding="utf-8") as f:
         f.write("# Auto-Generated by TinyML AutoML Engine\n")
+        inject_preprocessing_pipeline(f)
         f.write(f"model_type = 'random_forest_{'classifier' if is_classifier else 'regressor'}'\n")
         f.write(f"trees_features = {trees_features}\n")
         f.write(f"trees_thresholds = {trees_thresholds}\n")
@@ -353,6 +354,7 @@ def export_isolation_forest(model, filename="tinyml_model.py"):
         trees_right.append(tree.children_right.tolist())
     with open(filename, "w", encoding="utf-8") as f:
         f.write("# Auto-Generated by TinyML AutoML Engine\n")
+        inject_preprocessing_pipeline(f)
         f.write("model_type = 'isolation_forest'\n")
         f.write(f"trees_features = {trees_features}\n")
         f.write(f"trees_thresholds = {trees_thresholds}\n")
@@ -362,6 +364,7 @@ def export_isolation_forest(model, filename="tinyml_model.py"):
 def export_kmeans(model, filename="tinyml_model.py"):
     with open(filename, "w", encoding="utf-8") as f:
         f.write("# Auto-Generated by TinyML AutoML Engine\n")
+        inject_preprocessing_pipeline(f)
         f.write(f"model_type = 'kmeans_clustering'\n")
         f.write(f"centroids = {np.round(model.cluster_centers_, 4).tolist()}\n")
         f.write("n_clusters = len(centroids)\n")
