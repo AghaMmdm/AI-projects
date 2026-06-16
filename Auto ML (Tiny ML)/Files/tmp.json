@@ -1,7 +1,7 @@
 {
-    "csv_path": "../Data/DataLog.csv",
+    "csv_path": "../Data/diabetes.csv",
     "task_type": "1",
-    "target_column": "target",
+    "target_column": "Outcome",
     "execution_mode": "manual",
     "hyperparameters": {
         "decision_tree": {
