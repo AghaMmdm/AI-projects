@@ -1,1 +1,19 @@
-Data/*
+# Dataset and Extracted Features
+Data/*.wav
+Data/*.npy
+Data/speech_commands/
+
+# Python Cache and Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# OS generated files
+.DS_Store
+Thumbs.db

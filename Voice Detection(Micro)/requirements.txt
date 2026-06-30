@@ -1,0 +1,7 @@
+numpy
+librosa
+scikit-learn
+xgboost
+optuna
+tqdm
+jupyter
