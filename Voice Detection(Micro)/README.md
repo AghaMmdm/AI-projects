@@ -31,10 +31,11 @@ This project tackles the classic TinyML bottleneck: fitting a robust audio class
 │   └── main.py                     # MicroPython inference engine and I2S Mic handling
 ├── README.md                   
 └── requirements.txt
+```
 
 ## 🚀 Performance Benchmarks
-1. Cross-Validation Accuracy: ~78.6%
+1. **Cross-Validation Accuracy:** ~78.6%
 
-2. Model Export Size: ~2.5 KB
+2. **Model Export Size:** ~2.5 KB
 
-3. Inference Time (MicroPython): < 3ms
+3. **Inference Time (MicroPython):** < 3ms
