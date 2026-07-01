@@ -7,7 +7,7 @@ import time
 # ==========================================
 # 1. SETTINGS & PRE-ALLOCATION
 # ==========================================
-CLASSES = ["on", "off", "stop", "unknown"]
+CLASSES = ["up", "down", "unknown"]
 SAMPLES_PER_CLASS = 10  # تعداد دفعاتی که باید هر کلمه را تکرار کنید
 
 SAMPLE_RATE = 16000
@@ -47,7 +47,7 @@ def calibrate_noise_level(duration_sec=2.0):
     for _ in range(num_chunks):
         if audio_in.readinto(audio_buffer) > 0:
             total_energy += calculate_energy(audio_buffer)
-    noise_threshold = (total_energy / num_chunks) * 2.0 
+    noise_threshold = (total_energy / num_chunks) * 1.0 
     return noise_threshold
 
 # ==========================================

@@ -74,7 +74,7 @@ def calibrate_noise_level(duration_sec=2.0):
             
     mean_noise_energy = total_energy / num_chunks
     # ضریب 3.0 برای جلوگیری از تریگر شدن با نویزهای ریز
-    noise_threshold = mean_noise_energy * 3.0 
+    noise_threshold = mean_noise_energy * 1.0 
     print(f"Calibration Done! Threshold: {noise_threshold:.2f}")
     return noise_threshold
 
@@ -147,7 +147,7 @@ def extract_39_features(raw_buffer):
 # ==========================================
 def predict_audio_class(mfcc_features):
     num_original_features = 39 
-    num_super_features = 3     
+    num_super_features = 2     
     num_classes = len(model_data_lr.CLASSES)
     
     # اعمال ماتریس LDA
