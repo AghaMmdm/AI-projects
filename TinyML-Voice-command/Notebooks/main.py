@@ -1,92 +1,67 @@
 import gc
 gc.collect()
-
 import machine
 from machine import I2S, Pin
 import time
-import math
-import struct
+
+# Import the compiled machine learning model
+import model_data_lr_realtime
 
 # ==========================================
-# 1. MEMORY PRE-ALLOCATION
+# 1. SETTINGS & PRE-ALLOCATION
 # ==========================================
 SAMPLE_RATE = 16000
-CHUNK_SIZE = 3200  
-RECORD_SECONDS = 0.6 # 0.6 ثانیه برای کلمات کوتاه کافیست
+CHUNK_SIZE = 3200  # 0.1 seconds of audio chunk
+RECORD_SECONDS = 1.0  
 BUFFER_LENGTH = int(SAMPLE_RATE * 2 * RECORD_SECONDS)
 
+# Memory allocation for recording
 word_buffer = bytearray(BUFFER_LENGTH)
-audio_buffer = bytearray(CHUNK_SIZE)
 
-gc.collect()
+# Dual buffers for the Pre-roll History Buffer technique (Real-time clipping prevention)
+history_buf = bytearray(CHUNK_SIZE)
+current_buf = bytearray(CHUNK_SIZE)
 
-import model_data_lr
 gc.collect()
 
 # ==========================================
 # 2. HARDWARE CONFIGURATION
 # ==========================================
-SCK_PIN = 'Y6'
-WS_PIN = 'Y5'
-SD_PIN = 'Y8'
-
-try:
-    audio_in = I2S(
-        2, 
-        sck=Pin(SCK_PIN),
-        ws=Pin(WS_PIN),
-        sd=Pin(SD_PIN),
-        mode=I2S.RX,
-        bits=16,
-        format=I2S.MONO,
-        rate=SAMPLE_RATE,
-        ibuf=4096 
-    )
-except MemoryError:
-    print("FATAL ERROR: RAM fragmented. Reset board!")
-    machine.reset()
+audio_in = I2S(2, sck=Pin('Y6'), ws=Pin('Y5'), sd=Pin('Y8'), 
+               mode=I2S.RX, bits=16, format=I2S.MONO, 
+               rate=SAMPLE_RATE, ibuf=4096)
 
 # ==========================================
-# 3. ZERO-RAM VAD (Voice Activity Detection)
+# 3. VAD (Voice Activity Detection)
 # ==========================================
 def calculate_energy(buffer):
     sum_squares = 0.0
     buffer_len = len(buffer)
     for i in range(0, buffer_len, 2):
         val = buffer[i] | (buffer[i+1] << 8)
-        if val >= 32768:
-            val -= 65536
+        if val >= 32768: val -= 65536
         sum_squares += val * val
-        
     num_samples = buffer_len // 2
     if num_samples == 0: return 0
     return (sum_squares / num_samples) ** 0.5
 
 def calibrate_noise_level(duration_sec=2.0):
-    print("Calibrating environment noise... Keep quiet!")
+    print("Calibrating ambient noise... Keep quiet for 2 seconds!")
     total_energy = 0
     num_chunks = int((SAMPLE_RATE * 2) / CHUNK_SIZE) * int(duration_sec)
-    
     for _ in range(num_chunks):
-        num_bytes_read = audio_in.readinto(audio_buffer)
-        if num_bytes_read > 0:
-            total_energy += calculate_energy(audio_buffer)
+        if audio_in.readinto(current_buf) > 0:
+            total_energy += calculate_energy(current_buf)
             
-    mean_noise_energy = total_energy / num_chunks
-    # ضریب 3.0 برای جلوگیری از تریگر شدن با نویزهای ریز
-    noise_threshold = mean_noise_energy * 1.0 
-    print(f"Calibration Done! Threshold: {noise_threshold:.2f}")
+    # Set threshold to 2.0x the average ambient noise
+    noise_threshold = (total_energy / num_chunks) * 2.0 
     return noise_threshold
 
 # ==========================================
-# 4. ZERO-RAM FEATURE EXTRACTION (MFCC Approx)
+# 4. FEATURE EXTRACTION
 # ==========================================
 def compute_pseudo_mfcc(raw_buffer, start_byte, end_byte, num_coeffs=13):
-    """
-    محاسبه ویژگی‌ها مستقیماً روی بافر خام بدون اشغال رَم جدید
-    """
     features = [0.0] * num_coeffs
-    
     total_samples = (end_byte - start_byte) // 2
     samples_per_chunk = total_samples // num_coeffs
     bytes_per_chunk = samples_per_chunk * 2
@@ -94,128 +69,118 @@ def compute_pseudo_mfcc(raw_buffer, start_byte, end_byte, num_coeffs=13):
     for i in range(num_coeffs):
         chunk_start = start_byte + i * bytes_per_chunk
         chunk_end = chunk_start + bytes_per_chunk
-        
         chunk_energy = 0.0
         zero_crossings = 0
         last_sign = 0
         
         for j in range(chunk_start, chunk_end, 2):
-            # خواندن مستقیم اعداد 16 بیتی از بافر اصلی
             val = raw_buffer[j] | (raw_buffer[j+1] << 8)
-            if val >= 32768: 
-                val -= 65536
-            
+            if val >= 32768: val -= 65536
             chunk_energy += abs(val)
             sign = 1 if val > 0 else -1 if val < 0 else 0
             if sign != 0 and sign != last_sign:
                 zero_crossings += 1
                 last_sign = sign
                 
-        # میانگین‌گیری برای جلوگیری از سرریز اعداد
         mean_energy = chunk_energy / samples_per_chunk if samples_per_chunk > 0 else 0
         features[i] = (mean_energy * 0.1) + (zero_crossings * 0.5)
-        
     return features
 
 def extract_39_features(raw_buffer):
-    """
-    تقسیم مجازی بافر به 3 قسمت (بدون کپی کردن)
-    """
     buffer_len = len(raw_buffer)
-    
-    # محاسبه طول هر بخش به بایت (باید زوج باشد)
     bytes_per_part = ((buffer_len // 2) // 3) * 2
     
-    part1_start = 0
-    part1_end = bytes_per_part
+    p1_s, p1_e = 0, bytes_per_part
+    p2_s, p2_e = p1_e, p1_e + bytes_per_part
+    p3_s, p3_e = p2_e, p2_e + bytes_per_part
     
-    part2_start = part1_end
-    part2_end = part1_end + bytes_per_part
-    
-    part3_start = part2_end
-    part3_end = part2_end + bytes_per_part
-    
-    # ارسال آدرس بایت‌ها به جای کپی کردن کل آرایه
-    mfcc1 = compute_pseudo_mfcc(raw_buffer, part1_start, part1_end, 13)
-    mfcc2 = compute_pseudo_mfcc(raw_buffer, part2_start, part2_end, 13)
-    mfcc3 = compute_pseudo_mfcc(raw_buffer, part3_start, part3_end, 13)
-    
-    return mfcc1 + mfcc2 + mfcc3
+    m1 = compute_pseudo_mfcc(raw_buffer, p1_s, p1_e, 13)
+    m2 = compute_pseudo_mfcc(raw_buffer, p2_s, p2_e, 13)
+    m3 = compute_pseudo_mfcc(raw_buffer, p3_s, p3_e, 13)
+    return m1 + m2 + m3
 
 # ==========================================
-# 5. INFERENCE ENGINE (LDA + Logistic Regression)
+# 5. CLASSIFICATION PIPELINE (LDA + LR)
 # ==========================================
-def predict_audio_class(mfcc_features):
-    num_original_features = 39 
-    num_super_features = 2     
+def predict_audio_class(features):
+    num_original_features = 39
+    
+    # Dynamically extract dimensions from the imported model
+    num_super_features = len(model_data_lr.LDA_SCALINGS[0]) 
     num_classes = len(model_data_lr.CLASSES)
     
-    # اعمال ماتریس LDA
+    # STAGE 1: LDA Transformation (Dimensionality Reduction)
     lda_features = [0.0] * num_super_features
     for i in range(num_super_features):
         sum_val = 0.0
         for j in range(num_original_features):
-            sum_val += mfcc_features[j] * model_data_lr.LDA_SCALINGS[j][i]
+            # Apply XBAR subtraction (Mean Centering) for maximum accuracy
+            adjusted_feature = features[j] - model_data_lr.LDA_XBAR[j]
+            sum_val += adjusted_feature * model_data_lr.LDA_SCALINGS[j][i]
         lda_features[i] = sum_val
         
-    # رگرسیون لجستیک
-    class_scores = [0.0] * num_classes
+    # STAGE 2: Logistic Regression Inference
+    best_score = -999999.0
+    best_class = "unknown"
+    
     for c in range(num_classes):
-        score = model_data_lr.LR_INTERCEPT[0][c]
+        score = model_data_lr.LR_INTERCEPT[c]
         for i in range(num_super_features):
             score += lda_features[i] * model_data_lr.LR_COEF[c][i]
-        class_scores[c] = score
-        
-    # پیدا کردن بیشترین امتیاز
-    best_class = 0
-    max_score = class_scores[0]
-    for i in range(1, num_classes):
-        if class_scores[i] > max_score:
-            max_score = class_scores[i]
-            best_class = i
+            
+        if score > best_score:
+            best_score = score
+            best_class = model_data_lr.CLASSES[c]
             
     return best_class
 
 # ==========================================
-# 6. MAIN LOOP
+# 6. MAIN REAL-TIME LOOP
 # ==========================================
 def main():
-    time.sleep(1) 
+    global history_buf, current_buf
+    
+    time.sleep(1)
     threshold = calibrate_noise_level(duration_sec=2.0)
-    print("\nMicrophone is READY. Say 'On', 'Off', or 'Stop'...")
+    
+    print(f"\n[ SYSTEM READY ] Threshold set to {threshold:.2f}")
+    valid_commands = [c.upper() for c in model_data_lr.CLASSES if c != 'unknown']
+    print(f"Listening for commands: {valid_commands}")
+    print("-" * 40)
     
     while True:
-        num_bytes_read = audio_in.readinto(audio_buffer)
-        
-        if num_bytes_read > 0:
-            current_energy = calculate_energy(audio_buffer)
+        if audio_in.readinto(current_buf) > 0:
             
-            # تشخیص شروع کلمه
-            if current_energy > threshold:
-                print(f"Recording {RECORD_SECONDS}s...")
+            # Check if current audio energy triggers the VAD threshold
+            if calculate_energy(current_buf) > threshold:
                 
-                # کپی کردن بافر فعلی به ابتدای بافر اصلی
-                word_buffer[0:CHUNK_SIZE] = audio_buffer
-                # خواندن ادامه صدا تا پر شدن بافر 0.6 ثانیه‌ای
-                bytes_to_read = BUFFER_LENGTH - CHUNK_SIZE
-                audio_in.readinto(memoryview(word_buffer)[CHUNK_SIZE:BUFFER_LENGTH])
+                # VAD Triggered! Assemble the word buffer using the history pre-roll
+                word_buffer[0:CHUNK_SIZE] = history_buf
+                word_buffer[CHUNK_SIZE:2*CHUNK_SIZE] = current_buf
                 
-                # 1. استخراج ۳۹ ویژگی از صدای خام (همانند پایتون سرور)
+                # Stream the remainder of the 1-second audio window
+                audio_in.readinto(memoryview(word_buffer)[2*CHUNK_SIZE:])
+                
+                # Extract features and run model inference
                 features = extract_39_features(word_buffer)
+                predicted_class = predict_audio_class(features)
                 
-                # 2. استنتاج و پیش‌بینی کلمه
-                result_idx = predict_audio_class(features)
-                predicted_word = model_data_lr.CLASSES[result_idx]
-                
-                if predicted_word != 'unknown':
-                    print(f">>> PREDICTED: {predicted_word.upper()} <<<\n")
+                # Display Result
+                if predicted_class == "unknown":
+                    print("--> [ Noise / Unknown ] ignored.")
                 else:
-                    print("--- Unknown/Noise ---")
+                    print(f"--> >>> PREDICTED COMMAND: {predicted_class.upper()} <<<")
                 
-                # آزادسازی رم و مکث کوتاه برای جلوگیری از تشخیص تکراری
+                # Free memory and apply a short delay to prevent multi-triggering
                 gc.collect()
                 time.sleep(0.5)
-                print("Listening...")
+                
+                # Flush the audio buffer so old sounds don't trigger the next loop immediately
+                audio_in.readinto(current_buf)
+                
+            else:
+                # If quiet, swap buffers to maintain the rolling 0.1s history
+                history_buf, current_buf = current_buf, history_buf
 
 if __name__ == '__main__':
     main()

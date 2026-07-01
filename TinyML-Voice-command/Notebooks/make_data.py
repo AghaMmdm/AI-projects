@@ -8,15 +8,19 @@ import time
 # 1. SETTINGS & PRE-ALLOCATION
 # ==========================================
 CLASSES = ["up", "down", "unknown"]
-SAMPLES_PER_CLASS = 10  # تعداد دفعاتی که باید هر کلمه را تکرار کنید
+SAMPLES_PER_CLASS = 40  # 40 repetitions per class for high accuracy
 
 SAMPLE_RATE = 16000
-CHUNK_SIZE = 3200  
+CHUNK_SIZE = 3200  # 0.1 seconds of audio chunk
 RECORD_SECONDS = 1.0  
 BUFFER_LENGTH = int(SAMPLE_RATE * 2 * RECORD_SECONDS)
 
 word_buffer = bytearray(BUFFER_LENGTH)
-audio_buffer = bytearray(CHUNK_SIZE)
+
+# Dual buffers for the Pre-roll History Buffer technique
+history_buf = bytearray(CHUNK_SIZE)
+current_buf = bytearray(CHUNK_SIZE)
+
 gc.collect()
 
 # ==========================================
@@ -45,9 +49,10 @@ def calibrate_noise_level(duration_sec=2.0):
     total_energy = 0
     num_chunks = int((SAMPLE_RATE * 2) / CHUNK_SIZE) * int(duration_sec)
     for _ in range(num_chunks):
-        if audio_in.readinto(audio_buffer) > 0:
-            total_energy += calculate_energy(audio_buffer)
-    noise_threshold = (total_energy / num_chunks) * 1.0 
+        if audio_in.readinto(current_buf) > 0:
+            total_energy += calculate_energy(current_buf)
+    # A multiplier of 2.0 works perfectly for normal ambient environments
+    noise_threshold = (total_energy / num_chunks) * 2.0 
     return noise_threshold
 
 # ==========================================
@@ -92,57 +97,67 @@ def extract_39_features(raw_buffer):
     return m1 + m2 + m3
 
 # ==========================================
-# 5. DATASET BUILDER LOOP
+# 5. DATASET BUILDER LOOP (WITH PRE-ROLL)
 # ==========================================
 def main():
+    # Global buffers are required for zero-RAM pointer swapping
+    global history_buf, current_buf
+    
     time.sleep(1) 
     threshold = calibrate_noise_level(duration_sec=2.0)
     
-    # باز کردن فایل روی SD کارت با قابلیت اضافه کردن (Append)
-    # اگر برد ریست شود، دیتای قبلی پاک نمی‌شود
     filename = 'dataset.csv'
     print(f"\n[ SYSTEM READY ] Threshold set to {threshold:.2f}")
-    print(f"Data will be saved directly to SD Card: {filename}\n")
     
     for label in CLASSES:
-        print("=========================================")
+        print("\n=========================================")
         print(f"   PREPARE TO RECORD CLASS: >> {label.upper()} <<")
-        
         if label == "unknown":
-            print("   (Make random noises, cough, say other words)")
-            
+            print("   (Make noises, type on keyboard, say random words)")
         print("=========================================")
-        time.sleep(3) # فرصت برای آماده شدن شما
+        time.sleep(3) 
         
         sample_count = 0
         while sample_count < SAMPLES_PER_CLASS:
-            if audio_in.readinto(audio_buffer) > 0:
-                # منتظر شنیدن صدا...
-                if calculate_energy(audio_buffer) > threshold:
+            if audio_in.readinto(current_buf) > 0:
+                
+                # Check if audio energy triggers the VAD threshold
+                if calculate_energy(current_buf) > threshold:
                     print(f"Recording '{label}' ({sample_count + 1}/{SAMPLES_PER_CLASS})...", end="")
                     
-                    # ضبط 1 ثانیه کامل
-                    word_buffer[0:CHUNK_SIZE] = audio_buffer
-                    audio_in.readinto(memoryview(word_buffer)[CHUNK_SIZE:BUFFER_LENGTH])
+                    # Step 1: Prepend the 0.1s history buffer (catches the start of the word)
+                    word_buffer[0:CHUNK_SIZE] = history_buf
                     
-                    # استخراج ۳۹ ویژگی
+                    # Step 2: Append the current chunk that triggered the VAD
+                    word_buffer[CHUNK_SIZE:2*CHUNK_SIZE] = current_buf
+                    
+                    # Step 3: Stream the remaining audio into the buffer to hit 1.0 full second
+                    bytes_to_read = BUFFER_LENGTH - (2 * CHUNK_SIZE)
+                    audio_in.readinto(memoryview(word_buffer)[2*CHUNK_SIZE:])
+                    
+                    # Extract 39 structural features and save directly to SD card
                     features = extract_39_features(word_buffer)
-                    
-                    # ذخیره در فایل به فرمت CSV
                     with open(filename, 'a') as f:
-                        # فرمت: برچسب,ویژگی1,ویژگی2,...,ویژگی39
                         str_features = ",".join([f"{x:.4f}" for x in features])
                         f.write(f"{label},{str_features}\n")
                         
                     print(" Saved!")
                     sample_count += 1
-                    
                     gc.collect()
-                    time.sleep(1) # یک ثانیه توقف تا صدای نفس کشیدن شما را به عنوان کلمه جدید ثبت نکند
+                    
+                    # 1.5-second breathing room delay to prevent recording inhaling sounds
+                    time.sleep(1.5)
+                    
+                else:
+                    # If quiet, swap pointers to keep this chunk as the history frame for the next loop
+                    # Fast reference switching - consumes zero extra RAM allocation
+                    temp = history_buf
+                    history_buf = current_buf
+                    current_buf = temp
                     
     print("\n=========================================")
     print("   DATA COLLECTION COMPLETE! AWESOME!   ")
-    print("   You can now take out the SD Card.    ")
+    print("   Take out the SD Card and train.      ")
     print("=========================================")
 
 if __name__ == '__main__':
