@@ -1,0 +1,11 @@
+# Environments
+.env
+venv/
+env/
+
+# Python caching
+__pycache__/
+*.pyc
+
+# Vector Database local storage
+vector_store/
