@@ -1,9 +1,18 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from rag_core import get_chatbot_response
+from fastapi.middleware.cors import CORSMiddleware
 
 # Initialize FastAPI app
 app = FastAPI(title="WordPress AI Support API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Define request schema
 class ChatRequest(BaseModel):
