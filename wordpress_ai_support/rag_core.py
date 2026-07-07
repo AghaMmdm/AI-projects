@@ -12,7 +12,7 @@ from langchain_core.output_parsers import StrOutputParser
 load_dotenv()
 
 # Configuration variables
-DATA_PATH = "./data/knowledge_base.txt"
+DATA_PATH = "./data/bluewave_knowledge_base_V6.txt"
 FAISS_PATH = "./vector_store"
 
 def initialize_vector_db():
