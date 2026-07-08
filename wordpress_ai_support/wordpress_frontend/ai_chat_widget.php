@@ -2,6 +2,7 @@ add_action( 'wp_footer', 'add_custom_ai_chat_widget' );
 function add_custom_ai_chat_widget() {
     // آدرس لوگوی سایت شما
     $site_logo_url = 'https://bluewaverobotics.ir/wp-content/uploads/2026/07/IMG_1903.png';
+    $send_icon_url = 'https://bluewaverobotics.ir/wp-content/uploads/2026/07/paper-plane-solid-full.svg';
     ?>
     <style>
       /* Main widget container */
@@ -242,17 +243,19 @@ function add_custom_ai_chat_widget() {
         justify-content: center;
         transition: transform 0.2s;
         flex-shrink: 0;
+        padding: 15px;
       }
 
       #ai-chat-send:hover {
         transform: scale(1.05);
       }
 
-      #ai-chat-send svg {
+      #ai-chat-send img {
         width: 36px !important;
         height: 36px !important;
-        fill: currentColor;
-        transform: rotate(180deg);
+        object-fit: contain;
+        /* اگر عکس شما تیره است و میخواهید سفید شود (اختیاری): */
+        /* filter: brightness(0) invert(1); */
       }
 
       /* استایل‌های موبایل */
@@ -330,9 +333,7 @@ function add_custom_ai_chat_widget() {
         <div id="ai-chat-input-area">
           <input type="text" id="ai-chat-input" placeholder="پیام خود را بنویسید..." autocomplete="off" />
           <button id="ai-chat-send">
-            <svg width="36" height="36" viewBox="0 0 24 24" style="fill: currentColor; transform: rotate(180deg);">
-              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
-            </svg>
+            <img src="<?php echo esc_url($send_icon_url); ?>" alt="Send Button">
           </button>
         </div>
       </div>
@@ -438,21 +439,30 @@ function add_custom_ai_chat_widget() {
                     body: JSON.stringify({ message: text })
                 });
 
-                const data = await response.json();
-
                 statusText.innerHTML = '<span class="status-dot"></span> Online';
                 statusText.classList.remove('status-typing');
 
+                // حالت اول: سرور ارور داده (مثل تمام شدن توکن یا خطای 500 در پایتون)
+                if (!response.ok) {
+                    appendMessage('متاسفانه در حال حاضر سرویس هوش مصنوعی به دلیل ترافیک بالا یا محدودیت سرور در دسترس نیست. لطفاً دقایقی دیگر مجدداً تلاش کنید.', 'bot');
+                    return; // توقف اجرای بقیه کد
+                }
+
+                const data = await response.json();
+
+                // حالت دوم: سرور وصل شده ولی پاسخ خالی یا نامعتبر داده است
                 if(data.reply) {
                    appendMessage(data.reply, 'bot');
                 } else {
-                   appendMessage('پاسخ معتبری دریافت نشد.', 'bot');
+                   appendMessage('متاسفانه در پردازش درخواست شما خطایی رخ داد. لطفاً سوال خود را با جمله‌بندی دیگری مطرح کنید.', 'bot');
                 }
+
             } catch (error) {
+                // حالت سوم: کلا اینترنت کاربر قطع است یا سرور خاموش شده (ارور شبکه)
                 console.error("API Error:", error);
                 statusText.innerHTML = '<span class="status-dot"></span> Online';
                 statusText.classList.remove('status-typing');
-                appendMessage('ارتباط با سرور برقرار نشد!', 'bot');
+                appendMessage('ارتباط با سرور پشتیبانی قطع شده است. لطفاً وضعیت اینترنت خود را بررسی کرده و لحظاتی بعد دوباره تلاش کنید.', 'bot');
             }
         }
 
