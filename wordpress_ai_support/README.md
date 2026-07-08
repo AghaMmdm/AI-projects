@@ -1,21 +1,21 @@
-# 🤖 دستیار هوشمند بلو ویو رباتیکس (BlueWave AI Support)
+# 🤖 BlueWave AI Support
 
-این مخزن (Repository) شامل کدهای بک‌اند (Backend) و مستندات یکپارچه‌سازی فرانت‌اند (Frontend) برای چت‌بات هوشمند پشتیبانی سایت **BlueWave Robotics** است. این سیستم بر پایه معماری RAG (Retrieval-Augmented Generation) و فریم‌ورک FastAPI توسعه یافته است و به صورت یک ویجت شناور در وردپرس به کاربران خدمت‌رسانی می‌کند.
+This repository contains the backend code and frontend integration documentation for the BlueWave Robotics intelligent support chatbot. This system is developed based on the RAG (Retrieval-Augmented Generation) architecture and the FastAPI framework, serving users as a floating widget on WordPress.
 
-## 🏗 ساختار پروژه
+## 🏗 Project Structure
 
-پروژه از بخش‌های اصلی زیر تشکیل شده است:
+The project consists of the following main components:
 
-* `main.py`: هسته اصلی سرور وب مبتنی بر FastAPI که درخواست‌های ارسالی از سمت وردپرس را دریافت کرده، پردازش می‌کند و پاسخ‌ها را پس از تبدیل از Markdown به HTML استاندارد (همراه با دکمه‌های لینک) برمی‌گرداند.
-* `rag_core.py`: موتور جستجو و بازیابی اطلاعات (RAG) که سوال کاربر را با پایگاه دانش شرکت تطبیق داده و به LLM ارسال می‌کند.
-* `bluewave_knowledge_base_V6.txt`: پایگاه دانش متنی شامل تمامی مشخصات فنی، دیتاشیت‌ها و راهنمای راه‌اندازی محصولات (BlueMind, BlueLab, BlueMCU, سنسورها و ...).
-* `wordpress_widget.php`: کدهای سمت کاربر (HTML/CSS/JS) که از طریق افزونه Code Snippets در وردپرس تزریق می‌شود و رابط کاربری چت‌بات را می‌سازد.
+* `main.py`: The core FastAPI-based web server that receives requests from WordPress, processes them, and returns responses after converting Markdown to standard HTML (including link buttons).
+* `rag_core.py`: The search and information retrieval engine (RAG) that matches user queries with the company's knowledge base and sends them to the LLM.
+* `bluewave_knowledge_base_V6.txt`: The text knowledge base containing all technical specifications, datasheets, and setup guides for products (BlueMind, BlueLab, BlueMCU, sensors, etc.).
+* `wordpress_widget.php`: Client-side code (HTML/CSS/JS) injected into WordPress via the Code Snippets plugin to build the chatbot UI.
 
-## 🚀 راهنمای استقرار و بروزرسانی سرور
+## 🚀 Deployment and Server Update Guide
 
-برای استقرار اولیه یا اعمال تغییرات جدید از گیت‌هاب بر روی سرور لینوکسی، مراحل زیر را به ترتیب در ترمینال سرور اجرا کنید:
+For initial deployment or applying new changes from GitHub on a Linux server, run the following steps in sequence in the server terminal:
 
-### ۱. دریافت آخرین تغییرات از گیت‌هاب
+### 1. Fetch latest changes from GitHub
 ```bash
 cd /opt/AI-projects/wordpress_ai_support
 git fetch origin
@@ -23,39 +23,39 @@ git reset --hard origin/main
 git pull origin main
 ```
 
-### ۲. متوقف کردن سرویس قبلی
-قبل از اجرای نسخه جدید، باید پروسه‌های قبلی سرور متوقف شوند:
+### 2. Stop the previous service
+Before running the new version, previous server processes must be stopped:
 ```bash
 pkill -f uvicorn
 ```
 
-### ۳. نصب پیش‌نیازها
-محیط مجازی را فعال کرده و در صورت اضافه شدن کتابخانه جدید (مانند `markdown`)، آن‌ها را نصب کنید:
+### 3. Install dependencies
+Activate the virtual environment and install dependencies (e.g., if new libraries like `markdown` were added):
 ```bash
 source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### ۴. به‌روزرسانی پایگاه دانش (RAG)
-**مهم:** اگر فایلی در پایگاه دانش (`bluewave_knowledge_base_V6.txt`) تغییر کرده است، حتماً دستور زیر را برای بازسازی وکتور دیتابیس اجرا کنید:
+### 4. Update the Knowledge Base (RAG)
+**Important:** If any content in the knowledge base (`bluewave_knowledge_base_V6.txt`) has been modified, you must run the following command to rebuild the vector database:
 ```bash
 python3 rag_core.py
 ```
 
-### ۵. اجرای سرور در پس‌زمینه
-سرور را با استفاده از `nohup` در پس‌زمینه اجرا کنید تا با بستن ترمینال متوقف نشود:
+### 5. Run the server in the background
+Start the server using `nohup` so it continues running after you close the terminal:
 ```bash
 nohup uvicorn main:app --host 127.0.0.1 --port 8000 > output.log 2>&1 &
 ```
-*(برای مشاهده خطاهای احتمالی، می‌توانید از دستور `tail -n 20 output.log` استفاده کنید).*
+*(To view potential errors or server logs, you can use the command `tail -n 20 output.log`).*
 
-## 💻 یکپارچه‌سازی با وردپرس
+## 💻 WordPress Integration
 
-برای نمایش چت‌بات در سایت، کدهای موجود در فایل `wordpress_widget.php` باید از طریق افزونه **Code Snippets** در بخش `wp_footer` سایت وردپرسی قرار گیرند. 
-این کدها شامل:
-- استایل‌های CSS ریسپانسیو (طراحی شده برای دسکتاپ و موبایل).
-- منطق جاوااسکریپت برای مدیریت باز و بسته شدن پنجره چت (بدون تداخل Event Bubbling).
-- ارتباط امن با API سرور و رندر کردن دکمه‌های HTML بازگشتی از سمت پایتون.
+To display the chatbot on your website, the code provided in the `wordpress_widget.php` file must be inserted into the `wp_footer` section of your WordPress site using the **Code Snippets** plugin. 
+This code includes:
+- Responsive CSS styles (optimized for both desktop and mobile views).
+- JavaScript logic for toggling the chat window seamlessly (preventing Event Bubbling conflicts).
+- Secure API communication with the backend and rendering of HTML buttons returned by Python.
 
-## 👨‍💻 توسعه‌دهنده
-توسعه یافته توسط **محمد رحیمی** برای شرکت گسترش فناوری سامانه‌های رباتیک پارسیان (BlueWave Robotics).
+## 👨‍💻 Developer
+Developed by **Mohammad Rahimi** for Parsian Robotic Systems Technology Development Company (BlueWave Robotics).
