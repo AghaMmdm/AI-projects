@@ -346,160 +346,119 @@ function add_custom_ai_chat_widget() {
 
     <script>
       document.addEventListener("DOMContentLoaded", function() {
+        // Variables Definition
         const chatWidget = document.getElementById('ai-chat-widget');
-        const chatBtn = document.getElementById('ai-chat-button');
         const chatWindow = document.getElementById('ai-chat-window');
+        const chatBtn = document.getElementById('ai-chat-button');
         const closeBtn = document.getElementById('ai-chat-close');
         const sendBtn = document.getElementById('ai-chat-send');
         const inputField = document.getElementById('ai-chat-input');
         const messagesBox = document.getElementById('ai-chat-messages');
         const statusText = document.getElementById('chat-status-text');
         
-        // آدرس لوگو برای پیام‌های جاوااسکریپت
         const logoUrl = "<?php echo esc_js($site_logo_url); ?>";
-        
-        // ذخیره ارتفاع اولیه صفحه برای تشخیص تغییرات کیبورد
-        const initialWindowHeight = window.innerHeight;
 
-        function openChat() {
-          chatWindow.style.display = 'flex';
-          setTimeout(() => { chatWindow.classList.add('show'); }, 10);
-        }
-
+        // Close Chat Function
         function closeChat() {
-          chatWindow.classList.remove('show');
-          setTimeout(() => { chatWindow.style.display = 'none'; }, 300);
+            chatWindow.classList.remove('show');
+            setTimeout(() => chatWindow.style.display = 'none', 300);
         }
 
+        // Toggle Chat Window
         chatBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          if(chatWindow.classList.contains('show')) {
-            closeChat();
-          } else {
-            openChat();
-          }
-        });
-
-        closeBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          closeChat();
-        });
-
-        document.addEventListener('click', function(event) {
-          const isClickInside = chatWidget.contains(event.target);
-          if (!isClickInside && chatWindow.classList.contains('show')) {
-            closeChat();
-          }
-        });
-
-        chatWindow.addEventListener('click', function(e) {
-          e.stopPropagation();
-        });
-
-        // 1. تشخیص بسته شدن واقعی کیبورد با تغییر ارتفاع صفحه
-        window.addEventListener('resize', function() {
-          if (window.innerWidth <= 480) {
-            // اگر صفحه به اندازه اصلی نزدیک شد (یعنی کیبورد بسته شد)
-            if (window.innerHeight > initialWindowHeight * 0.8) {
-              chatWindow.classList.remove('keyboard-active');
-              inputField.blur();
-            } else {
-              chatWindow.classList.add('keyboard-active');
-            }
-          }
-        });
-
-        // 2. رویدادهای فوکوس
-        inputField.addEventListener('focus', function() {
-          if (window.innerWidth <= 480) {
-            chatWindow.classList.add('keyboard-active');
-            setTimeout(() => { messagesBox.scrollTop = messagesBox.scrollHeight; }, 300);
-          }
-        });
-
-        inputField.addEventListener('blur', function() {
-          if (window.innerWidth <= 480) {
-            setTimeout(() => {
-              // چک مجدد بعد از blur که اگر کیبورد واقعاً بسته بود پنجره بزرگ بشه
-              if (window.innerHeight > initialWindowHeight * 0.8) {
-                chatWindow.classList.remove('keyboard-active');
+              e.stopPropagation(); 
+              
+              if (chatWindow.style.display === 'flex') {
+                  closeChat();
+              } else {
+                  chatWindow.style.display = 'flex';
+                  setTimeout(() => chatWindow.classList.add('show'), 10);
               }
-            }, 100);
-          }
-        });
-        
-        // 3. اگر کاربر روی چت‌ها کلیک/لمس کرد، کیبورد به صورت امن بسته شود
-        messagesBox.addEventListener('touchstart', function() {
-          if (document.activeElement === inputField && window.innerWidth <= 480) {
-            inputField.blur();
-            chatWindow.classList.remove('keyboard-active');
-          }
         });
 
-        // Ensure you are using innerHTML to render the formatted response
+        // Close button click
+        closeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            closeChat();
+        });
+
+        // Outside click to close
+        document.addEventListener('click', function(event) {
+            if (event.target.closest('#ai-chat-button')) return;
+
+            const isClickInside = chatWidget.contains(event.target);
+            if (!isClickInside && chatWindow.classList.contains('show')) {
+                closeChat();
+            }
+        });
+
+        // Prevent closing when clicking inside the window
+        chatWindow.addEventListener('click', function(e) {
+            e.stopPropagation();
+        });
+
+        // Function to append messages with correct structure
         function appendMessage(message, sender) {
-          const chatContainer = document.getElementById('chat-container');
-          const msgDiv = document.createElement('div');
-          msgDiv.className = sender === 'bot' ? 'bot-message' : 'user-message';
-          
-          // Using innerHTML allows the browser to render the HTML buttons sent by Python
-          msgDiv.innerHTML = message;
-          
-          chatContainer.appendChild(msgDiv);
-        }
-          
-
-        async function sendMessage() {
-          const text = inputField.value.trim();
-          if (!text) return;
-
-          appendMessage(text, 'user');
-          inputField.value = '';
-
-          statusText.innerHTML = '<span class="status-dot"></span> Typing...';
-          statusText.classList.add('status-typing');
-
-          try {
-            const response = await fetch('https://chat.bluewaverobotics.ir/chat', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({ message: text })
-            });
-
-            const data = await response.json();
-
-            statusText.innerHTML = '<span class="status-dot"></span> Online';
-            statusText.classList.remove('status-typing');
-
-            if(data.reply) {
-               appendMessage(data.reply, 'bot');
-            } else {
-               appendMessage('پاسخ معتبری دریافت نشد.', 'bot');
+            const wrapper = document.createElement('div');
+            wrapper.className = sender === 'bot' ? 'chat-msg-wrapper msg-bot-wrapper' : 'chat-msg-wrapper msg-user-wrapper';
+            
+            if (sender === 'bot') {
+                const avatar = document.createElement('div');
+                avatar.className = 'bot-avatar';
+                avatar.innerHTML = `<img src="${logoUrl}" alt="Bot">`;
+                wrapper.appendChild(avatar);
             }
 
-          } catch (error) {
-            console.error("API Connection Error:", error);
-            statusText.innerHTML = '<span class="status-dot"></span> Online';
-            statusText.classList.remove('status-typing');
-            appendMessage('ارتباط با سرور هوش مصنوعی برقرار نشد!', 'bot');
-          }
+            const msgDiv = document.createElement('div');
+            msgDiv.className = sender === 'bot' ? 'chat-msg msg-bot' : 'chat-msg msg-user';
+            
+            // Using innerHTML to render HTML buttons from server
+            msgDiv.innerHTML = message;
+            
+            wrapper.appendChild(msgDiv);
+            messagesBox.appendChild(wrapper);
+            messagesBox.scrollTop = messagesBox.scrollHeight;
         }
 
-        inputField.addEventListener('keypress', function (e) {
-          if (e.key === 'Enter') {
-            sendMessage();
-            inputField.blur();
-            chatWindow.classList.remove('keyboard-active');
-          }
-        });
+        // Send Message Function
+        async function sendMessage() {
+            const text = inputField.value.trim();
+            if (!text) return;
 
-        sendBtn.addEventListener('click', function() {
-            sendMessage();
-            inputField.blur();
-            chatWindow.classList.remove('keyboard-active');
-        });
+            appendMessage(text, 'user');
+            inputField.value = '';
+
+            statusText.innerHTML = '<span class="status-dot"></span> Typing...';
+            statusText.classList.add('status-typing');
+
+            try {
+                const response = await fetch('https://chat.bluewaverobotics.ir/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text })
+                });
+
+                const data = await response.json();
+
+                statusText.innerHTML = '<span class="status-dot"></span> Online';
+                statusText.classList.remove('status-typing');
+
+                if(data.reply) {
+                   appendMessage(data.reply, 'bot');
+                } else {
+                   appendMessage('پاسخ معتبری دریافت نشد.', 'bot');
+                }
+            } catch (error) {
+                console.error("API Error:", error);
+                statusText.innerHTML = '<span class="status-dot"></span> Online';
+                statusText.classList.remove('status-typing');
+                appendMessage('ارتباط با سرور برقرار نشد!', 'bot');
+            }
+        }
+
+        // Event Listeners for sending
+        sendBtn.addEventListener('click', sendMessage);
+        inputField.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
       });
     </script>
     <?php
