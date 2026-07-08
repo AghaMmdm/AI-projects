@@ -30,15 +30,23 @@ Below is an overview of the projects included in this repository. Click on any p
 *   **Domain:** Embedded Systems / Microcontrollers
 *   **Tech Stack:** MicroPython, Sensors
 *   **Description:** A hardware-interfacing project focused on reading and processing RGB color values directly on a microcontroller, bridging the gap between raw sensor data and algorithmic logic.
+*   
+
+### 🤖 [BlueWave AI Support](./WordPress-AI-Support)
+* **Domain:** Natural Language Processing (NLP) / Web Integration
+* **Tech Stack:** Python, FastAPI, RAG Architecture, JavaScript, PHP
+* **Description:** An end-to-end Retrieval-Augmented Generation (RAG) chatbot deployed as a floating WordPress widget. It serves as an intelligent technical support assistant for robotics hardware, featuring a high-performance FastAPI backend, dynamic markdown-to-HTML parsing, and a custom optimized frontend UI.
 
 ---
 
 ## 🛠️ Global Tech Stack
 
 Across these folders, I leverage a diverse set of tools tailored for modern engineering:
-*   **Machine Learning:** Scikit-Learn, XGBoost, Optuna
-*   **Data Processing:** Pandas, NumPy, Librosa
-*   **Hardware/Edge:** Microcontrollers, MicroPython
+* **Machine Learning & AI:** Scikit-Learn, XGBoost, Optuna, RAG Architecture, NLP
+* **Backend & APIs:** Python, FastAPI
+* **Data Processing:** Pandas, NumPy, Librosa
+* **Hardware/Edge:** Microcontrollers, MicroPython
+* **Web Integration:** JavaScript, HTML/CSS, PHP (WordPress Code Snippets)
 
 ---
 *Maintained by Mohammad Rahimi*
