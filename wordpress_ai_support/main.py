@@ -14,12 +14,10 @@ class ChatResponse(BaseModel):
     reply: str
 
 def process_response(text: str) -> str:
-    # 1. Convert Markdown to HTML first
-    html_text = markdown.markdown(text)
+    # 1. Convert Markdown to HTML (فعال کردن افزونه جدول)
+    html_text = markdown.markdown(text, extensions=['tables'])
     
-    # 2. Regex to find URLs:
-    # (?<!href=") ensures we don't touch links that are already inside an <a> tag
-    # (https?://[^\s<>"]+) matches the URL
+    # 2. Regex to find URLs
     url_pattern = r'(?<!href=")(https?://[^\s<>"]+)'
     
     # 3. HTML button template
@@ -27,7 +25,7 @@ def process_response(text: str) -> str:
         r'<br><a href="\1" target="_blank" '
         r'style="display:inline-block; margin:10px 0; padding:10px 15px; '
         r'background-color:#0073aa; color:#ffffff; border-radius:5px; '
-        r'text-decoration:none; font-weight:bold;">View More Information</a><br>'
+        r'text-decoration:none; font-weight:bold;">مشاهده اطلاعات بیشتر</a><br>'
     )
     
     # Replace only clean URLs

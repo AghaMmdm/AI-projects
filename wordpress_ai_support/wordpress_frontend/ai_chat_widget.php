@@ -299,6 +299,39 @@ function add_custom_ai_chat_widget() {
           font-size: 15px;
           padding: 12px 15px;
         }
+
+        .chat-msg table {
+          width: 100%;
+          border-collapse: collapse;
+          margin: 15px 0;
+          font-size: 14px;
+          display: block; 
+          overflow-x: auto;
+        }
+
+        .chat-msg th, .chat-msg td {
+          border: 1px solid #cbd5e1;
+          padding: 10px 12px;
+          text-align: right;
+        }
+
+        .chat-msg th {
+          background-color: #f1f5f9;
+          font-weight: bold;
+          color: #1e293b;
+        }
+
+        .chat-msg tr:nth-child(even) {
+          background-color: #f8fafc;
+        }
+
+        .chat-msg table::-webkit-scrollbar {
+          height: 6px;
+        }
+        .chat-msg table::-webkit-scrollbar-thumb {
+          background: #94a3b8; 
+          border-radius: 10px;
+        }
         
         #ai-chat-button {
           position: fixed !important;
