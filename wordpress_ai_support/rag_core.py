@@ -7,6 +7,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
+from langchain.retrievers.multi_query import MultiQueryRetriever # Added for Query Expansion
 
 # Load environment variables (API Key)
 load_dotenv()
@@ -24,11 +25,11 @@ def initialize_vector_db():
     documents = loader.load()
 
     print("Splitting text into chunks...")
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    # Slightly increased chunk size helps retain context for comparative questions
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=700, chunk_overlap=100)
     chunks = text_splitter.split_documents(documents)
 
     print("Generating Google embeddings and building FAISS database...")
-    # Fix: Changed to the latest Google embedding model (gemini-embedding-2)
     embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-2")
     
     vector_db = FAISS.from_documents(chunks, embeddings)
@@ -39,30 +40,34 @@ def initialize_vector_db():
 def format_docs(docs):
     """
     Utility function to format retrieved documents into a single string.
+    Filters out exact duplicates to keep the LLM context clean and efficient.
     """
-    return "\n\n".join(doc.page_content for doc in docs)
+    # Use a set to automatically drop duplicate text chunks found by the MultiQueryRetriever
+    unique_docs = list({doc.page_content for doc in docs})
+    return "\n\n---\n\n".join(unique_docs)
 
 def get_chatbot_response(user_query: str) -> str:
     """
-    Takes the user query, searches the FAISS DB, and returns the Gemini API response
-    using modern LCEL architecture.
+    Takes the user query, generates sub-queries for better retrieval (Query Expansion),
+    searches the FAISS DB, and returns the Gemini API response acting as a Technical Consultant.
     """
     # 1. Load the existing vector database
-    # Fix: Changed to the latest Google embedding model
     embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-2")
     vector_db = FAISS.load_local(FAISS_PATH, embeddings, allow_dangerous_deserialization=True)
     
     # 2. Setup the Gemini LLM
-    # Fix: Upgraded to Gemini 3.5 Flash (Older models like 1.5-flash are deprecated)
     llm = ChatGoogleGenerativeAI(model="gemini-3.5-flash", temperature=0.1)
 
-    # 3. Define the system prompt
+    # 3. Define the advanced System Prompt (Consultant Persona)
     system_prompt = (
-        "You are a helpful customer support assistant for a website. "
-        "Use the following retrieved context to answer the user's question in Persian (Farsi). "
-        "If you don't know the answer or the answer is not in the context, "
-        "just say: 'متاسفانه من اطلاعاتی در این زمینه ندارم. لطفا با شماره پشتیبانی تماس بگیرید.' "
-        "Do not make up answers.\n\n"
+        "تو یک مشاور فنی ارشد و مهندس فروش در شرکت BlueWave Robotics هستی.\n"
+        "وظیفه تو پاسخ‌گویی دقیق، حرفه‌ای و دلسوزانه به مشتریان بر اساس اطلاعات ارائه شده است.\n\n"
+        "دستورالعمل‌های حیاتی:\n"
+        "۱. فقط و فقط از اطلاعات موجود در متن (Context) استفاده کن.\n"
+        "۲. اگر کاربر تفاوت دو محصول را پرسید، اطلاعات هر دو را استخراج کن و به صورت یک مقایسه ساختاریافته (جدول یا لیست بولت‌دار) همراه با نتیجه‌گیری ارائه بده.\n"
+        "۳. اگر کاربر برای شروع کار راهنمایی خواست، بهترین برد را بر اساس اطلاعات پیشنهاد بده و دلیل این انتخاب را بیان کن.\n"
+        "۴. اگر سوال خارج از محصولات و حوزه رباتیک بود، محترمانه بگو که فقط در زمینه محصولات BlueWave تخصص داری.\n"
+        "۵. هرگز مستقیماً نگو 'اطلاعات ندارم'؛ بلکه بگو 'با توجه به اطلاعات فعلی...' و بهترین حدس یا راهنمایی نزدیک را ارائه کن.\n\n"
         "Context:\n{context}"
     )
 
@@ -71,18 +76,25 @@ def get_chatbot_response(user_query: str) -> str:
         ("human", "{input}"),
     ])
 
-    # 4. Create the retriever
-    retriever = vector_db.as_retriever(search_kwargs={"k": 3})
+    # 4. Create the base retriever
+    base_retriever = vector_db.as_retriever(search_kwargs={"k": 3})
 
-    # 5. Build the RAG chain using LCEL
+    # 5. Apply Query Expansion using LangChain's MultiQueryRetriever
+    # This automatically asks the LLM to break down comparative questions into simpler background searches
+    advanced_retriever = MultiQueryRetriever.from_llm(
+        retriever=base_retriever,
+        llm=llm
+    )
+
+    # 6. Build the RAG chain using LCEL
     rag_chain = (
-        {"context": retriever | format_docs, "input": RunnablePassthrough()}
+        {"context": advanced_retriever | format_docs, "input": RunnablePassthrough()}
         | prompt
         | llm
         | StrOutputParser()
     )
 
-    # 6. Execute and return the clean string response
+    # 7. Execute and return the clean string response
     response = rag_chain.invoke(user_query)
     return response
 
