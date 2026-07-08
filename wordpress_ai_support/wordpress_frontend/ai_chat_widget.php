@@ -1,5 +1,7 @@
 add_action( 'wp_footer', 'add_custom_ai_chat_widget' );
 function add_custom_ai_chat_widget() {
+    // آدرس لوگوی سایت شما
+    $site_logo_url = 'https://bluewaverobotics.ir/wp-content/uploads/2026/07/IMG_1903.png';
     ?>
     <style>
       /* Main widget container */
@@ -7,12 +9,12 @@ function add_custom_ai_chat_widget() {
         position: fixed;
         bottom: 25px;
         right: 25px;
-        z-index: 999999;
+        z-index: 2147483647 !important;
         font-family: 'IRANYekan', 'Yekan', 'B Yekan', Tahoma, sans-serif;
         direction: rtl;
       }
       
-      /* Floating action button with pulse animation */
+      /* Floating action button */
       #ai-chat-button {
         width: 65px;
         height: 65px;
@@ -26,6 +28,7 @@ function add_custom_ai_chat_widget() {
         align-items: center;
         justify-content: center;
         transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        z-index: 2147483647 !important;
       }
       
       #ai-chat-button:hover {
@@ -33,12 +36,12 @@ function add_custom_ai_chat_widget() {
         box-shadow: 0 12px 25px rgba(124, 58, 237, 0.5);
       }
 
-      /* Chat window styling with slide-in animation */
+      /* Chat window styling */
       #ai-chat-window {
         display: none;
         opacity: 0;
-        width: 380px;
-        height: 550px;
+        width: 400px;
+        height: 600px;
         background: #ffffff;
         border-radius: 20px;
         box-shadow: 0 10px 40px rgba(0,0,0,0.15);
@@ -47,7 +50,7 @@ function add_custom_ai_chat_widget() {
         margin-bottom: 20px;
         border: 1px solid #f3f4f6;
         transform: translateY(20px);
-        transition: opacity 0.3s ease, transform 0.3s ease;
+        transition: opacity 0.3s ease, transform 0.3s ease, height 0.3s ease, bottom 0.3s ease;
       }
 
       /* When chat is active */
@@ -61,7 +64,7 @@ function add_custom_ai_chat_widget() {
       #ai-chat-header {
         background: linear-gradient(135deg, #2563eb, #7c3aed);
         color: white;
-        padding: 20px;
+        padding: 22px 20px;
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -75,34 +78,45 @@ function add_custom_ai_chat_widget() {
 
       .header-title {
         font-weight: 700;
-        font-size: 16px;
+        font-size: 18px;
       }
 
       .header-status {
-        font-size: 12px;
+        font-size: 14px;
         color: #e5e7eb;
         display: flex;
         align-items: center;
-        gap: 5px;
-        margin-top: 4px;
+        gap: 6px;
+        margin-top: 5px;
       }
 
       .status-dot {
-        width: 8px;
-        height: 8px;
+        width: 9px;
+        height: 9px;
         background-color: #10b981;
         border-radius: 50%;
         display: inline-block;
+        transition: background-color 0.3s;
+      }
+      
+      .status-typing .status-dot {
+        background-color: #f59e0b;
+        animation: pulse-dot 1s infinite alternate;
+      }
+      
+      @keyframes pulse-dot {
+        from { opacity: 0.4; }
+        to { opacity: 1; }
       }
 
       #ai-chat-close {
         cursor: pointer;
-        font-size: 20px;
+        font-size: 22px;
         opacity: 0.8;
         transition: opacity 0.2s;
         background: rgba(255,255,255,0.2);
-        width: 30px;
-        height: 30px;
+        width: 34px;
+        height: 34px;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -125,19 +139,10 @@ function add_custom_ai_chat_widget() {
         gap: 15px;
       }
 
-      /* Custom Scrollbar for webkit */
-      #ai-chat-messages::-webkit-scrollbar {
-        width: 6px;
-      }
-      #ai-chat-messages::-webkit-scrollbar-track {
-        background: transparent;
-      }
-      #ai-chat-messages::-webkit-scrollbar-thumb {
-        background: #cbd5e1;
-        border-radius: 10px;
-      }
+      #ai-chat-messages::-webkit-scrollbar { width: 6px; }
+      #ai-chat-messages::-webkit-scrollbar-track { background: transparent; }
+      #ai-chat-messages::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
 
-      /* Base message bubble */
       .chat-msg-wrapper {
         display: flex;
         flex-direction: column;
@@ -145,14 +150,13 @@ function add_custom_ai_chat_widget() {
       }
 
       .chat-msg {
-        padding: 12px 16px;
-        font-size: 14px;
-        line-height: 1.6;
+        padding: 14px 18px;
+        font-size: 16px;
+        line-height: 1.7;
         word-wrap: break-word;
         box-shadow: 0 2px 5px rgba(0,0,0,0.05);
       }
 
-      /* User message styling */
       .msg-user-wrapper {
         align-self: flex-start;
       }
@@ -163,26 +167,31 @@ function add_custom_ai_chat_widget() {
         border-radius: 18px 18px 4px 18px;
       }
 
-      /* Bot message styling */
       .msg-bot-wrapper {
         align-self: flex-end;
         display: flex;
-        gap: 8px;
+        gap: 10px;
         max-width: 90%;
       }
       
       .bot-avatar {
-        width: 28px;
-        height: 28px;
-        background: #7c3aed;
-        color: white;
+        width: 34px;
+        height: 34px;
         border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 12px;
         flex-shrink: 0;
         margin-top: auto;
+        overflow: hidden;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+      }
+
+      .bot-avatar img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
       }
 
       .msg-bot {
@@ -199,16 +208,17 @@ function add_custom_ai_chat_widget() {
         background: white;
         border-top: 1px solid #f1f5f9;
         gap: 10px;
+        align-items: center;
       }
 
       #ai-chat-input {
         flex: 1;
-        padding: 10px 15px;
+        padding: 12px 18px;
         border: 1px solid #e2e8f0;
         border-radius: 25px;
         outline: none;
         font-family: inherit;
-        font-size: 14px;
+        font-size: 15px;
         background: #f8fafc;
         transition: all 0.2s;
       }
@@ -223,35 +233,79 @@ function add_custom_ai_chat_widget() {
         background: linear-gradient(135deg, #2563eb, #7c3aed);
         color: white;
         border: none;
-        width: 45px;
-        height: 45px;
+        width: 48px;
+        height: 48px;
         border-radius: 50%;
         cursor: pointer;
         display: flex;
         align-items: center;
         justify-content: center;
         transition: transform 0.2s;
+        flex-shrink: 0;
       }
 
       #ai-chat-send:hover {
-        transform: scale(1.1);
+        transform: scale(1.05);
       }
 
       #ai-chat-send svg {
-        width: 30px !important;
-        height: 30px !important;
+        width: 36px !important;
+        height: 36px !important;
         fill: currentColor;
-        transform: rotate(180deg); /* Adjust for RTL */
+        transform: rotate(180deg);
       }
 
-      /* Mobile Responsiveness */
+      /* استایل‌های موبایل */
       @media (max-width: 480px) {
+        #ai-chat-widget {
+          position: fixed;
+          bottom: 0;
+          right: 0;
+          z-index: 2147483647 !important;
+        }
+        
         #ai-chat-window {
           width: calc(100vw - 40px);
-          height: calc(100vh - 120px);
-          bottom: 90px;
+          height: 75vh !important; 
+          max-height: 700px;
+          bottom: 150px !important; 
           right: 20px;
-          position: fixed;
+          left: auto;
+          margin-bottom: 0;
+          border-radius: 20px;
+          position: fixed !important;
+          z-index: 2147483647 !important;
+          border: 1px solid #f3f4f6;
+          transform: translateY(20px);
+        }
+        
+        #ai-chat-window.show {
+          transform: translateY(0);
+        }
+        
+        #ai-chat-window.keyboard-active {
+          height: 40vh !important; 
+          bottom: 80px !important; 
+        }
+        
+        #ai-chat-header {
+          padding: 15px;
+        }
+        
+        .chat-msg {
+          font-size: 15px;
+          padding: 12px 15px;
+        }
+        
+        #ai-chat-button {
+          position: fixed !important;
+          bottom: 70px !important; 
+          right: 20px !important;
+          z-index: 2147483647 !important;
+        }
+        
+        #ai-chat-input-area {
+          padding: 12px 10px;
         }
       }
     </style>
@@ -261,14 +315,14 @@ function add_custom_ai_chat_widget() {
         <div id="ai-chat-header">
           <div class="header-info">
             <span class="header-title">پشتیبانی هوشمند</span>
-            <span class="header-status"><span class="status-dot"></span> Online</span>
+            <span class="header-status" id="chat-status-text"><span class="status-dot"></span> Online</span>
           </div>
           <div id="ai-chat-close">✕</div>
         </div>
         
         <div id="ai-chat-messages">
           <div class="msg-bot-wrapper">
-            <div class="bot-avatar">AI</div>
+            <div class="bot-avatar"><img src="<?php echo esc_url($site_logo_url); ?>" alt="Bot Logo"></div>
             <div class="chat-msg msg-bot">سلام! من دستیار هوشمند سایت هستم. چطور می‌توانم به شما کمک کنم؟</div>
           </div>
         </div>
@@ -276,7 +330,7 @@ function add_custom_ai_chat_widget() {
         <div id="ai-chat-input-area">
           <input type="text" id="ai-chat-input" placeholder="پیام خود را بنویسید..." autocomplete="off" />
           <button id="ai-chat-send">
-            <svg width="30" height="30" viewBox="0 0 24 24" style="fill: white; transform: rotate(180deg);">
+            <svg width="36" height="36" viewBox="0 0 24 24" style="fill: currentColor; transform: rotate(180deg);">
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
             </svg>
           </button>
@@ -292,70 +346,121 @@ function add_custom_ai_chat_widget() {
 
     <script>
       document.addEventListener("DOMContentLoaded", function() {
+        const chatWidget = document.getElementById('ai-chat-widget');
         const chatBtn = document.getElementById('ai-chat-button');
         const chatWindow = document.getElementById('ai-chat-window');
         const closeBtn = document.getElementById('ai-chat-close');
         const sendBtn = document.getElementById('ai-chat-send');
         const inputField = document.getElementById('ai-chat-input');
         const messagesBox = document.getElementById('ai-chat-messages');
+        const statusText = document.getElementById('chat-status-text');
+        
+        // آدرس لوگو برای پیام‌های جاوااسکریپت
+        const logoUrl = "<?php echo esc_js($site_logo_url); ?>";
+        
+        // ذخیره ارتفاع اولیه صفحه برای تشخیص تغییرات کیبورد
+        const initialWindowHeight = window.innerHeight;
 
-        // Toggle chat visibility with animation class
-        chatBtn.addEventListener('click', () => {
-          if(chatWindow.classList.contains('show')) {
-            chatWindow.classList.remove('show');
-            setTimeout(() => { chatWindow.style.display = 'none'; }, 300);
-          } else {
-            chatWindow.style.display = 'flex';
-            // Slight delay to allow display:flex to apply before adding opacity class
-            setTimeout(() => { chatWindow.classList.add('show'); }, 10);
-          }
-        });
-
-        // Close chat
-        closeBtn.addEventListener('click', () => {
-          chatWindow.classList.remove('show');
-          setTimeout(() => { chatWindow.style.display = 'none'; }, 300);
-        });
-
-        // Function to append messages to the chat DOM
-        function appendMessage(text, sender) {
-          const wrapper = document.createElement('div');
-          
-          if (sender === 'user') {
-            wrapper.className = 'chat-msg-wrapper msg-user-wrapper';
-            wrapper.innerHTML = `<div class="chat-msg msg-user">${text}</div>`;
-          } else {
-            wrapper.className = 'msg-bot-wrapper';
-            wrapper.innerHTML = `
-              <div class="bot-avatar">AI</div>
-              <div class="chat-msg msg-bot">${text}</div>
-            `;
-          }
-          
-          const msgId = 'msg-' + Date.now();
-          wrapper.id = msgId;
-          messagesBox.appendChild(wrapper);
-          
-          // Auto-scroll to the bottom
-          messagesBox.scrollTop = messagesBox.scrollHeight;
-          return msgId;
+        function openChat() {
+          chatWindow.style.display = 'flex';
+          setTimeout(() => { chatWindow.classList.add('show'); }, 10);
         }
 
-        // Handle the API request
+        function closeChat() {
+          chatWindow.classList.remove('show');
+          setTimeout(() => { chatWindow.style.display = 'none'; }, 300);
+        }
+
+        chatBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if(chatWindow.classList.contains('show')) {
+            closeChat();
+          } else {
+            openChat();
+          }
+        });
+
+        closeBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          closeChat();
+        });
+
+        document.addEventListener('click', function(event) {
+          const isClickInside = chatWidget.contains(event.target);
+          if (!isClickInside && chatWindow.classList.contains('show')) {
+            closeChat();
+          }
+        });
+
+        chatWindow.addEventListener('click', function(e) {
+          e.stopPropagation();
+        });
+
+        // 1. تشخیص بسته شدن واقعی کیبورد با تغییر ارتفاع صفحه
+        window.addEventListener('resize', function() {
+          if (window.innerWidth <= 480) {
+            // اگر صفحه به اندازه اصلی نزدیک شد (یعنی کیبورد بسته شد)
+            if (window.innerHeight > initialWindowHeight * 0.8) {
+              chatWindow.classList.remove('keyboard-active');
+              inputField.blur();
+            } else {
+              chatWindow.classList.add('keyboard-active');
+            }
+          }
+        });
+
+        // 2. رویدادهای فوکوس
+        inputField.addEventListener('focus', function() {
+          if (window.innerWidth <= 480) {
+            chatWindow.classList.add('keyboard-active');
+            setTimeout(() => { messagesBox.scrollTop = messagesBox.scrollHeight; }, 300);
+          }
+        });
+
+        inputField.addEventListener('blur', function() {
+          if (window.innerWidth <= 480) {
+            setTimeout(() => {
+              // چک مجدد بعد از blur که اگر کیبورد واقعاً بسته بود پنجره بزرگ بشه
+              if (window.innerHeight > initialWindowHeight * 0.8) {
+                chatWindow.classList.remove('keyboard-active');
+              }
+            }, 100);
+          }
+        });
+        
+        // 3. اگر کاربر روی چت‌ها کلیک/لمس کرد، کیبورد به صورت امن بسته شود
+        messagesBox.addEventListener('touchstart', function() {
+          if (document.activeElement === inputField && window.innerWidth <= 480) {
+            inputField.blur();
+            chatWindow.classList.remove('keyboard-active');
+          }
+        });
+
+        // Ensure you are using innerHTML to render the formatted response
+        function appendMessage(message, sender) {
+          const chatContainer = document.getElementById('chat-container');
+          const msgDiv = document.createElement('div');
+          msgDiv.className = sender === 'bot' ? 'bot-message' : 'user-message';
+          
+          // Using innerHTML allows the browser to render the HTML buttons sent by Python
+          msgDiv.innerHTML = message;
+          
+          chatContainer.appendChild(msgDiv);
+        }
+          
+
         async function sendMessage() {
           const text = inputField.value.trim();
           if (!text) return;
 
-          // Render user message and clear input
           appendMessage(text, 'user');
           inputField.value = '';
 
-          // Show typing indicator
-          const loadingId = appendMessage('در حال تایپ...', 'bot');
+          statusText.innerHTML = '<span class="status-dot"></span> Typing...';
+          statusText.classList.add('status-typing');
 
           try {
-            // NOTE: Update this URL to your VPS IP once it is ready!
-            const response = await fetch('http://127.0.0.1:8000/chat', {
+            const response = await fetch('https://chat.bluewaverobotics.ir/chat', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json'
@@ -365,10 +470,9 @@ function add_custom_ai_chat_widget() {
 
             const data = await response.json();
 
-            // Remove typing indicator
-            document.getElementById(loadingId).remove();
+            statusText.innerHTML = '<span class="status-dot"></span> Online';
+            statusText.classList.remove('status-typing');
 
-            // Render AI response
             if(data.reply) {
                appendMessage(data.reply, 'bot');
             } else {
@@ -377,19 +481,25 @@ function add_custom_ai_chat_widget() {
 
           } catch (error) {
             console.error("API Connection Error:", error);
-            document.getElementById(loadingId).remove();
+            statusText.innerHTML = '<span class="status-dot"></span> Online';
+            statusText.classList.remove('status-typing');
             appendMessage('ارتباط با سرور هوش مصنوعی برقرار نشد!', 'bot');
           }
         }
 
-        // Event listeners for sending message
         inputField.addEventListener('keypress', function (e) {
           if (e.key === 'Enter') {
             sendMessage();
+            inputField.blur();
+            chatWindow.classList.remove('keyboard-active');
           }
         });
 
-        sendBtn.addEventListener('click', sendMessage);
+        sendBtn.addEventListener('click', function() {
+            sendMessage();
+            inputField.blur();
+            chatWindow.classList.remove('keyboard-active');
+        });
       });
     </script>
     <?php
