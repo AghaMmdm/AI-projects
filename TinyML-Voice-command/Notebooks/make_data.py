@@ -8,16 +8,17 @@ import time
 # 1. SETTINGS & PRE-ALLOCATION
 # ==========================================
 CLASSES = ["up", "down", "unknown"]
-SAMPLES_PER_CLASS = 40  # 40 repetitions per class for high accuracy
+SAMPLES_PER_CLASS = 40  
 
 SAMPLE_RATE = 16000
-CHUNK_SIZE = 3200  # 0.1 seconds of audio chunk
+CHUNK_SIZE = 3200  
 RECORD_SECONDS = 1.0  
 BUFFER_LENGTH = int(SAMPLE_RATE * 2 * RECORD_SECONDS)
 
-word_buffer = bytearray(BUFFER_LENGTH)
+# --- MICROPHONE SENSITIVITY ---
+GAIN_MULTIPLIER = 8 
 
-# Dual buffers for the Pre-roll History Buffer technique
+word_buffer = bytearray(BUFFER_LENGTH)
 history_buf = bytearray(CHUNK_SIZE)
 current_buf = bytearray(CHUNK_SIZE)
 
@@ -31,7 +32,24 @@ audio_in = I2S(2, sck=Pin('Y6'), ws=Pin('Y5'), sd=Pin('Y8'),
                rate=SAMPLE_RATE, ibuf=4096)
 
 # ==========================================
-# 3. VAD & CALIBRATION
+# 3. DIGITAL GAIN AMPLIFIER
+# ==========================================
+def apply_digital_gain(buffer, num_bytes, gain_multiplier):
+    for i in range(0, num_bytes, 2):
+        val = buffer[i] | (buffer[i+1] << 8)
+        if val >= 32768: val -= 65536
+        
+        val = val * gain_multiplier
+        
+        if val > 32767: val = 32767
+        elif val < -32768: val = -32768
+        
+        if val < 0: val += 65536
+        buffer[i] = val & 0xFF
+        buffer[i+1] = (val >> 8) & 0xFF
+
+# ==========================================
+# 4. VAD & CALIBRATION
 # ==========================================
 def calculate_energy(buffer):
     sum_squares = 0.0
@@ -49,14 +67,16 @@ def calibrate_noise_level(duration_sec=2.0):
     total_energy = 0
     num_chunks = int((SAMPLE_RATE * 2) / CHUNK_SIZE) * int(duration_sec)
     for _ in range(num_chunks):
-        if audio_in.readinto(current_buf) > 0:
+        num_read = audio_in.readinto(current_buf)
+        if num_read > 0:
+            apply_digital_gain(current_buf, num_read, GAIN_MULTIPLIER)
             total_energy += calculate_energy(current_buf)
-    # A multiplier of 2.0 works perfectly for normal ambient environments
+            
     noise_threshold = (total_energy / num_chunks) * 2.0 
     return noise_threshold
 
 # ==========================================
-# 4. ZERO-RAM FEATURE EXTRACTION
+# 5. ZERO-RAM FEATURE EXTRACTION
 # ==========================================
 def compute_pseudo_mfcc(raw_buffer, start_byte, end_byte, num_coeffs=13):
     features = [0.0] * num_coeffs
@@ -97,10 +117,9 @@ def extract_39_features(raw_buffer):
     return m1 + m2 + m3
 
 # ==========================================
-# 5. DATASET BUILDER LOOP (WITH PRE-ROLL)
+# 6. DATASET BUILDER LOOP
 # ==========================================
 def main():
-    # Global buffers are required for zero-RAM pointer swapping
     global history_buf, current_buf
     
     time.sleep(1) 
@@ -119,23 +138,24 @@ def main():
         
         sample_count = 0
         while sample_count < SAMPLES_PER_CLASS:
-            if audio_in.readinto(current_buf) > 0:
+            num_read = audio_in.readinto(current_buf)
+            if num_read > 0:
                 
-                # Check if audio energy triggers the VAD threshold
+                # Apply gain immediately after reading
+                apply_digital_gain(current_buf, num_read, GAIN_MULTIPLIER)
+                
                 if calculate_energy(current_buf) > threshold:
                     print(f"Recording '{label}' ({sample_count + 1}/{SAMPLES_PER_CLASS})...", end="")
                     
-                    # Step 1: Prepend the 0.1s history buffer (catches the start of the word)
                     word_buffer[0:CHUNK_SIZE] = history_buf
-                    
-                    # Step 2: Append the current chunk that triggered the VAD
                     word_buffer[CHUNK_SIZE:2*CHUNK_SIZE] = current_buf
                     
-                    # Step 3: Stream the remaining audio into the buffer to hit 1.0 full second
-                    bytes_to_read = BUFFER_LENGTH - (2 * CHUNK_SIZE)
-                    audio_in.readinto(memoryview(word_buffer)[2*CHUNK_SIZE:])
+                    # Read remainder and apply gain to it as well
+                    remainder_view = memoryview(word_buffer)[2*CHUNK_SIZE:]
+                    num_rem = audio_in.readinto(remainder_view)
+                    if num_rem > 0:
+                        apply_digital_gain(remainder_view, num_rem, GAIN_MULTIPLIER)
                     
-                    # Extract 39 structural features and save directly to SD card
                     features = extract_39_features(word_buffer)
                     with open(filename, 'a') as f:
                         str_features = ",".join([f"{x:.4f}" for x in features])
@@ -144,20 +164,15 @@ def main():
                     print(" Saved!")
                     sample_count += 1
                     gc.collect()
-                    
-                    # 1.5-second breathing room delay to prevent recording inhaling sounds
                     time.sleep(1.5)
                     
                 else:
-                    # If quiet, swap pointers to keep this chunk as the history frame for the next loop
-                    # Fast reference switching - consumes zero extra RAM allocation
                     temp = history_buf
                     history_buf = current_buf
                     current_buf = temp
                     
     print("\n=========================================")
     print("   DATA COLLECTION COMPLETE! AWESOME!   ")
-    print("   Take out the SD Card and train.      ")
     print("=========================================")
 
 if __name__ == '__main__':

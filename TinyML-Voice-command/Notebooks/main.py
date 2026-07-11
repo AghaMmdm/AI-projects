@@ -3,24 +3,23 @@ gc.collect()
 import machine
 from machine import I2S, Pin
 import time
-
-# Import the compiled machine learning model
-import model_data_lr_realtime
+import struct
 
 # ==========================================
 # 1. SETTINGS & PRE-ALLOCATION
 # ==========================================
 SAMPLE_RATE = 16000
-CHUNK_SIZE = 3200  # 0.1 seconds of audio chunk
+CHUNK_SIZE = 3200  
 RECORD_SECONDS = 1.0  
 BUFFER_LENGTH = int(SAMPLE_RATE * 2 * RECORD_SECONDS)
+GAIN_MULTIPLIER = 8 
 
-# Memory allocation for recording
 word_buffer = bytearray(BUFFER_LENGTH)
-
-# Dual buffers for the Pre-roll History Buffer technique (Real-time clipping prevention)
 history_buf = bytearray(CHUNK_SIZE)
 current_buf = bytearray(CHUNK_SIZE)
+
+# متغیر سراسری برای نگه‌داری وزن‌های شبکه عصبی
+NN_MODEL = {}
 
 gc.collect()
 
@@ -32,16 +31,65 @@ audio_in = I2S(2, sck=Pin('Y6'), ws=Pin('Y5'), sd=Pin('Y8'),
                rate=SAMPLE_RATE, ibuf=4096)
 
 # ==========================================
-# 3. VAD (Voice Activity Detection)
+# 3. BINARY NEURAL NETWORK LOADER
 # ==========================================
-def calculate_energy(buffer):
+def load_nn_model():
+    print("\nLoading Neural Network Binary File... ", end="")
+    try:
+        with open('model_weights.bin', 'rb') as f:
+            # خواندن ابعاد شبکه
+            header = f.read(6)
+            num_feat, num_hidden, num_classes = struct.unpack('<HHH', header)
+            
+            def read_floats(count):
+                return [struct.unpack('<f', f.read(4))[0] for _ in range(count)]
+            
+            NN_MODEL['mean'] = read_floats(num_feat)
+            NN_MODEL['scale'] = read_floats(num_feat)
+            
+            W1 = []
+            for _ in range(num_feat): W1.append(read_floats(num_hidden))
+            NN_MODEL['W1'] = W1
+            NN_MODEL['B1'] = read_floats(num_hidden)
+            
+            W2 = []
+            for _ in range(num_hidden): W2.append(read_floats(num_classes))
+            NN_MODEL['W2'] = W2
+            NN_MODEL['B2'] = read_floats(num_classes)
+            NN_MODEL['classes'] = ['on', 'off', 'stop', 'unknown']
+            
+        print(f"Done! (Hidden Neurons: {num_hidden})")
+        gc.collect()
+    except Exception as e:
+        print("\n[!] ERROR: Could not load 'model_weights.bin'. Make sure it is on the SD Card!")
+        print(e)
+        while True: time.sleep(1)
+
+# ==========================================
+# 4. DIGITAL GAIN & VAD
+# ==========================================
+def apply_digital_gain(buffer, num_bytes, gain_multiplier):
+    for i in range(0, num_bytes, 2):
+        val = buffer[i] | (buffer[i+1] << 8)
+        if val >= 32768: val -= 65536
+        
+        val = val * gain_multiplier
+        
+        if val > 32767: val = 32767
+        elif val < -32768: val = -32768
+        
+        if val < 0: val += 65536
+        buffer[i] = val & 0xFF
+        buffer[i+1] = (val >> 8) & 0xFF
+
+def calculate_energy(buffer, start=0, end=None):
+    if end is None: end = len(buffer)
     sum_squares = 0.0
-    buffer_len = len(buffer)
-    for i in range(0, buffer_len, 2):
+    for i in range(start, end, 2):
         val = buffer[i] | (buffer[i+1] << 8)
         if val >= 32768: val -= 65536
         sum_squares += val * val
-    num_samples = buffer_len // 2
+    num_samples = (end - start) // 2
     if num_samples == 0: return 0
     return (sum_squares / num_samples) ** 0.5
 
@@ -50,137 +98,224 @@ def calibrate_noise_level(duration_sec=2.0):
     total_energy = 0
     num_chunks = int((SAMPLE_RATE * 2) / CHUNK_SIZE) * int(duration_sec)
     for _ in range(num_chunks):
-        if audio_in.readinto(current_buf) > 0:
+        num_read = audio_in.readinto(current_buf)
+        if num_read > 0:
+            apply_digital_gain(current_buf, num_read, GAIN_MULTIPLIER)
             total_energy += calculate_energy(current_buf)
             
-    # Set threshold to 2.0x the average ambient noise
-    noise_threshold = (total_energy / num_chunks) * 2.0 
+    noise_threshold = (total_energy / num_chunks) * 0.45 
     return noise_threshold
 
 # ==========================================
-# 4. FEATURE EXTRACTION
+# 5. SMART FEATURE EXTRACTION
 # ==========================================
-def compute_pseudo_mfcc(raw_buffer, start_byte, end_byte, num_coeffs=13):
-    features = [0.0] * num_coeffs
-    total_samples = (end_byte - start_byte) // 2
-    samples_per_chunk = total_samples // num_coeffs
-    bytes_per_chunk = samples_per_chunk * 2
-    
-    for i in range(num_coeffs):
-        chunk_start = start_byte + i * bytes_per_chunk
-        chunk_end = chunk_start + bytes_per_chunk
-        chunk_energy = 0.0
-        zero_crossings = 0
-        last_sign = 0
-        
-        for j in range(chunk_start, chunk_end, 2):
-            val = raw_buffer[j] | (raw_buffer[j+1] << 8)
-            if val >= 32768: val -= 65536
-            chunk_energy += abs(val)
-            sign = 1 if val > 0 else -1 if val < 0 else 0
-            if sign != 0 and sign != last_sign:
-                zero_crossings += 1
-                last_sign = sign
-                
-        mean_energy = chunk_energy / samples_per_chunk if samples_per_chunk > 0 else 0
-        features[i] = (mean_energy * 0.1) + (zero_crossings * 0.5)
-    return features
-
-def extract_39_features(raw_buffer):
+def get_trim_indices(raw_buffer, noise_floor):
+    window_size = 512 
     buffer_len = len(raw_buffer)
-    bytes_per_part = ((buffer_len // 2) // 3) * 2
+    start_idx = 0
+    end_idx = buffer_len
     
-    p1_s, p1_e = 0, bytes_per_part
-    p2_s, p2_e = p1_e, p1_e + bytes_per_part
-    p3_s, p3_e = p2_e, p2_e + bytes_per_part
+    for i in range(0, buffer_len, window_size):
+        chunk_end = min(i + window_size, buffer_len)
+        if calculate_energy(raw_buffer, i, chunk_end) > noise_floor * 1.5:
+            start_idx = max(0, i - (window_size * 2))
+            break
+            
+    for i in range(buffer_len - window_size, -1, -window_size):
+        chunk_end = min(i + window_size, buffer_len)
+        if calculate_energy(raw_buffer, i, chunk_end) > noise_floor * 1.5:
+            end_idx = min(buffer_len, chunk_end + (window_size * 2))
+            break
+            
+    if start_idx >= end_idx - 1000:
+        return 0, buffer_len
+    return start_idx, end_idx
+
+def compute_smart_features(raw_buffer, start_byte, end_byte, num_coeffs=13):
+    num_samples = (end_byte - start_byte) // 2
+    if num_samples <= 0: return [0.0] * num_coeffs
     
-    m1 = compute_pseudo_mfcc(raw_buffer, p1_s, p1_e, 13)
-    m2 = compute_pseudo_mfcc(raw_buffer, p2_s, p2_e, 13)
-    m3 = compute_pseudo_mfcc(raw_buffer, p3_s, p3_e, 13)
+    max_amp = 1
+    sum_amp = 0
+    sum_high_freq = 0
+    sum_low_freq = 0
+    zcr = 0
+    peaks = 0
+    last_val = 0
+    last_low = 0
+    last_sign = 0
+    last_diff_sign = 0
+    
+    envelope = [0.0] * 8
+    samples_per_bin = max(1, num_samples // 8)
+    sample_idx = 0
+    
+    for i in range(start_byte, end_byte, 2):
+        val = raw_buffer[i] | (raw_buffer[i+1] << 8)
+        if val >= 32768: val -= 65536
+        abs_val = abs(val)
+        
+        if abs_val > max_amp: max_amp = abs_val
+        sum_amp += abs_val
+        
+        diff = val - last_val
+        sum_high_freq += abs(diff)
+        
+        low_val = (last_low * 8 + val * 2) // 10
+        sum_low_freq += abs(low_val)
+        
+        bin_idx = min(7, sample_idx // samples_per_bin)
+        envelope[bin_idx] += abs_val
+        
+        if abs_val > 300: 
+            sign = 1 if val > 0 else -1
+            if sign != last_sign and last_sign != 0: zcr += 1
+            last_sign = sign
+            
+            diff_sign = 1 if diff > 0 else -1 if diff < 0 else 0
+            if diff_sign != last_diff_sign and last_diff_sign == 1: peaks += 1
+            last_diff_sign = diff_sign
+            
+        last_val = val
+        last_low = low_val
+        sample_idx += 1
+        
+    f1 = (sum_amp / num_samples) / max_amp              
+    f2 = sum_high_freq / (sum_amp + 1) 
+    f3 = sum_low_freq / (sum_amp + 1)  
+    f4 = zcr / num_samples             
+    f5 = peaks / num_samples           
+    
+    max_env = max(envelope)
+    if max_env == 0: max_env = 1
+    env_norm = [e / max_env for e in envelope] 
+    
+    return [f1, f2, f3, f4, f5] + env_norm
+
+def extract_39_features(raw_buffer, noise_floor):
+    start_idx, end_idx = get_trim_indices(raw_buffer, noise_floor)
+    trimmed_len = end_idx - start_idx
+    
+    bytes_per_part = ((trimmed_len // 2) // 3) * 2
+    
+    p1_s = start_idx
+    p1_e = p1_s + bytes_per_part
+    p2_s = p1_e
+    p2_e = p2_s + bytes_per_part
+    p3_s = p2_e
+    p3_e = end_idx 
+    
+    m1 = compute_smart_features(raw_buffer, p1_s, p1_e, 13)
+    m2 = compute_smart_features(raw_buffer, p2_s, p2_e, 13)
+    m3 = compute_smart_features(raw_buffer, p3_s, p3_e, 13)
+    
     return m1 + m2 + m3
 
 # ==========================================
-# 5. CLASSIFICATION PIPELINE (LDA + LR)
+# 6. NEURAL NETWORK PIPELINE (SCALER + MLP)
 # ==========================================
+def relu(x):
+    return x if x > 0 else 0.0
+
 def predict_audio_class(features):
-    num_original_features = 39
+    num_features = 39
+    num_hidden = len(NN_MODEL['B1'])
+    num_classes = len(NN_MODEL['classes'])
     
-    # Dynamically extract dimensions from the imported model
-    num_super_features = len(model_data_lr.LDA_SCALINGS[0]) 
-    num_classes = len(model_data_lr.CLASSES)
-    
-    # STAGE 1: LDA Transformation (Dimensionality Reduction)
-    lda_features = [0.0] * num_super_features
-    for i in range(num_super_features):
-        sum_val = 0.0
-        for j in range(num_original_features):
-            # Apply XBAR subtraction (Mean Centering) for maximum accuracy
-            adjusted_feature = features[j] - model_data_lr.LDA_XBAR[j]
-            sum_val += adjusted_feature * model_data_lr.LDA_SCALINGS[j][i]
-        lda_features[i] = sum_val
+    # STAGE 1: Apply StandardScaler
+    scaled_features = [0.0] * num_features
+    for j in range(num_features):
+        scaled_features[j] = (features[j] - NN_MODEL['mean'][j]) / NN_MODEL['scale'][j]
         
-    # STAGE 2: Logistic Regression Inference
+    # STAGE 2: Hidden Layer (Matrix Multiplication + ReLU)
+    hidden_layer = [0.0] * num_hidden
+    for i in range(num_hidden):
+        sum_val = NN_MODEL['B1'][i]
+        for j in range(num_features):
+            sum_val += scaled_features[j] * NN_MODEL['W1'][j][i]
+        hidden_layer[i] = relu(sum_val)
+        
+    # STAGE 3: Output Layer (Matrix Multiplication)
     best_score = -999999.0
     best_class = "unknown"
     
     for c in range(num_classes):
-        score = model_data_lr.LR_INTERCEPT[c]
-        for i in range(num_super_features):
-            score += lda_features[i] * model_data_lr.LR_COEF[c][i]
+        score = NN_MODEL['B2'][c]
+        for i in range(num_hidden):
+            score += hidden_layer[i] * NN_MODEL['W2'][i][c]
             
         if score > best_score:
             best_score = score
-            best_class = model_data_lr.CLASSES[c]
+            best_class = NN_MODEL['classes'][c]
             
     return best_class
 
 # ==========================================
-# 6. MAIN REAL-TIME LOOP
+# 7. MAIN 10-ITERATION LOOP
 # ==========================================
 def main():
     global history_buf, current_buf
+    
+    # ابتدا مدل سنگین لود می‌شود
+    load_nn_model()
     
     time.sleep(1)
     threshold = calibrate_noise_level(duration_sec=2.0)
     
     print(f"\n[ SYSTEM READY ] Threshold set to {threshold:.2f}")
-    valid_commands = [c.upper() for c in model_data_lr.CLASSES if c != 'unknown']
-    print(f"Listening for commands: {valid_commands}")
-    print("-" * 40)
+    valid_commands = [c.upper() for c in NN_MODEL['classes'] if c != 'unknown']
+    print(f"Target commands: {valid_commands}")
     
-    while True:
-        if audio_in.readinto(current_buf) > 0:
+    TOTAL_ATTEMPTS = 10
+    
+    for attempt in range(1, TOTAL_ATTEMPTS + 1):
+        print("\n" + "="*40)
+        print(f"   --- TEST ATTEMPT {attempt}/{TOTAL_ATTEMPTS} ---")
+        print("   Get ready...")
+        time.sleep(1.5)  
+        
+        audio_in.readinto(current_buf)
+        for i in range(CHUNK_SIZE): history_buf[i] = 0
             
-            # Check if current audio energy triggers the VAD threshold
-            if calculate_energy(current_buf) > threshold:
+        print(">>> SPEAK NOW! <<<")
+        
+        spoken = False
+        while not spoken:
+            num_read = audio_in.readinto(current_buf)
+            if num_read > 0:
+                apply_digital_gain(current_buf, num_read, GAIN_MULTIPLIER)
                 
-                # VAD Triggered! Assemble the word buffer using the history pre-roll
-                word_buffer[0:CHUNK_SIZE] = history_buf
-                word_buffer[CHUNK_SIZE:2*CHUNK_SIZE] = current_buf
-                
-                # Stream the remainder of the 1-second audio window
-                audio_in.readinto(memoryview(word_buffer)[2*CHUNK_SIZE:])
-                
-                # Extract features and run model inference
-                features = extract_39_features(word_buffer)
-                predicted_class = predict_audio_class(features)
-                
-                # Display Result
-                if predicted_class == "unknown":
-                    print("--> [ Noise / Unknown ] ignored.")
+                if calculate_energy(current_buf) > threshold:
+                    print("   (Voice detected, Neural Net analyzing...) ", end="")
+                    
+                    word_buffer[0:CHUNK_SIZE] = history_buf
+                    word_buffer[CHUNK_SIZE:2*CHUNK_SIZE] = current_buf
+                    
+                    remainder_view = memoryview(word_buffer)[2*CHUNK_SIZE:]
+                    num_rem = audio_in.readinto(remainder_view)
+                    
+                    if num_rem > 0:
+                        apply_digital_gain(remainder_view, num_rem, GAIN_MULTIPLIER)
+                    
+                    features = extract_39_features(word_buffer, threshold)
+                    predicted_class = predict_audio_class(features)
+                    
+                    print("Done!")
+                    if predicted_class == "unknown":
+                        print("   --> [ Noise / Unknown ] ignored.")
+                    else:
+                        print(f"   --> >>> PREDICTED COMMAND: {predicted_class.upper()} <<<")
+                    
+                    spoken = True 
+                    gc.collect()
+                    time.sleep(1) 
+                    
                 else:
-                    print(f"--> >>> PREDICTED COMMAND: {predicted_class.upper()} <<<")
-                
-                # Free memory and apply a short delay to prevent multi-triggering
-                gc.collect()
-                time.sleep(0.5)
-                
-                # Flush the audio buffer so old sounds don't trigger the next loop immediately
-                audio_in.readinto(current_buf)
-                
-            else:
-                # If quiet, swap buffers to maintain the rolling 0.1s history
-                history_buf, current_buf = current_buf, history_buf
+                    history_buf, current_buf = current_buf, history_buf
+
+    print("\n=========================================")
+    print("   TESTING COMPLETED. 10/10 DONE!        ")
+    print("=========================================")
 
 if __name__ == '__main__':
     main()
