@@ -2,12 +2,13 @@ import os
 from dotenv import load_dotenv
 from langchain_community.document_loaders import TextLoader
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-# Load environment variables (API Key)
+# Load environment variables (API Keys)
 load_dotenv()
 
 # Configuration variables
@@ -36,15 +37,21 @@ def initialize_vector_db():
 
 def get_chatbot_response(user_query: str) -> str:
     """
-    Uses custom Native Query Expansion and advanced Prompt Engineering 
-    to handle complex/comparative queries without relying on unstable external modules.
+    Handles user queries with an explicit Fallback mechanism between Gemini and Groq
+    to display which engine processed the request.
     """
     # 1. Load the existing vector database
     embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-2")
     vector_db = FAISS.load_local(FAISS_PATH, embeddings, allow_dangerous_deserialization=True)
     
-    # 2. Setup the Gemini LLM
-    llm = ChatGoogleGenerativeAI(model="gemini-3.5-flash", temperature=0.1)
+    # ==========================================
+    # Fallback AI System (Primary + Backup)
+    # ==========================================
+    # Primary Engine: Gemini
+    primary_llm = ChatGoogleGenerativeAI(model="gemini-3.5-flash", temperature=0.1)
+    
+    # Backup Engine: Llama 3 (70B) on Groq's high-speed servers
+    fallback_llm = ChatGroq(model="llama3-70b-8192", temperature=0.1)
 
     # ==========================================
     # STEP A: NATIVE QUERY EXPANSION
@@ -57,29 +64,38 @@ def get_chatbot_response(user_query: str) -> str:
     """
     
     try:
-        # Ask LLM to break down the query
-        expanded_str = llm.invoke(expansion_prompt).content
-        # Split by comma and clean up whitespace
-        search_queries = [q.strip() for q in expanded_str.split(',')]
-        # Always ensure the original query is included
-        if user_query not in search_queries:
-            search_queries.append(user_query)
+        # Try primary LLM (Gemini) for query expansion
+        expanded_str = primary_llm.invoke(expansion_prompt).content
     except Exception as e:
-        print(f"Expansion failed, using default query: {e}")
-        search_queries = [user_query]
+        print(f"Gemini expansion failed: {e}")
+        try:
+            # Fallback to Groq for query expansion
+            expanded_str = fallback_llm.invoke(expansion_prompt).content
+        except Exception as fallback_e:
+            print(f"Groq expansion failed: {fallback_e}")
+            expanded_str = user_query
+
+    # Clean and prepare the search queries
+    search_queries = [q.strip() for q in expanded_str.split(',')]
+    if user_query not in search_queries:
+        search_queries.append(user_query)
 
     # ==========================================
     # STEP B: MANUAL MULTI-SEARCH & DEDUPLICATION
     # ==========================================
-    retrieved_docs = []
-    for q in search_queries:
-        # Search the database for each sub-query
-        docs = vector_db.similarity_search(q, k=2)
-        retrieved_docs.extend(docs)
-        
-    # Extract text and remove exact duplicates using a Set
-    unique_contents = list({doc.page_content for doc in retrieved_docs})
-    formatted_context = "\n\n---\n\n".join(unique_contents)
+    try:
+        retrieved_docs = []
+        for q in search_queries:
+            docs = vector_db.similarity_search(q, k=2)
+            retrieved_docs.extend(docs)
+            
+        # Remove duplicates using a set
+        unique_contents = list({doc.page_content for doc in retrieved_docs})
+        formatted_context = "\n\n---\n\n".join(unique_contents)
+    except Exception as e:
+        # Catch errors if Google Embeddings API limit is reached
+        print(f"Vector search failed: {e}")
+        return "متاسفانه ترافیک سرور بسیار بالاست و ارتباط با پایگاه دانش موقتاً قطع شده است. لطفاً چند دقیقه دیگر امتحان کنید."
 
     # ==========================================
     # STEP C: FINAL ANSWER GENERATION (CONSULTANT)
@@ -101,13 +117,28 @@ def get_chatbot_response(user_query: str) -> str:
         ("human", "{input}"),
     ])
 
-    # Build simple LCEL chain
-    rag_chain = final_prompt | llm | StrOutputParser()
-    
-    # Execute and return
-    response = rag_chain.invoke({"input": user_query})
-    return response
+    # To identify which model generated the response for testing purposes:
+    try:
+        # Try Gemini first
+        chain = final_prompt | primary_llm | StrOutputParser()
+        response = chain.invoke({"input": user_query})
+        # Add Gemini identifier
+        return f"**[🤖 Responded by: Gemini 3.5]**\n\n{response}"
+        
+    except Exception as e:
+        print(f"Gemini failed, switching to Groq: {e}")
+        try:
+            # Try Groq as fallback
+            chain = final_prompt | fallback_llm | StrOutputParser()
+            response = chain.invoke({"input": user_query})
+            # Add Groq identifier
+            return f"**[⚡ Responded by: Groq (Llama 3)]**\n\n{response}"
+            
+        except Exception as fallback_e:
+            # Final layer of defense if both cloud servers fail
+            print(f"All LLMs failed: {fallback_e}")
+            return "سرورهای پردازش ابری در حال حاضر در دسترس نیستند. لطفاً در صورت نیاز به راهنمایی فوری با شماره پشتیبانی 09130912580 تماس بگیرید."
 
 if __name__ == "__main__":
-    # Build the database when running this file directly
+    # Rebuild the local vector DB
     initialize_vector_db()
