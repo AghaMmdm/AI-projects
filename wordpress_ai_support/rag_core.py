@@ -34,8 +34,55 @@ def initialize_vector_db():
     vector_db.save_local(FAISS_PATH)
     
     print("Vector database initialized successfully.")
+    
+    
+def check_local_fast_answers(user_query: str):
+    """
+    بررسی سوال کاربر برای پاسخگویی سریع محلی و بدون نیاز به API
+    """
+    # یکسان‌سازی حروف برای جستجوی بهتر (ی و ک عربی به فارسی)
+    query = user_query.lower().replace('ي', 'ی').replace('ك', 'ک')
+    
+    # بانک کلیدواژه‌ها و پاسخ‌های قطعی
+    local_faqs = {
+        ("سلام", "درود", "خسته نباشید", "وقت بخیر", "hi", "hello"): 
+            "سلام! من دستیار هوشمند BlueWave Robotics هستم. چطور می‌توانم راهنمایی‌تان کنم؟",
+            
+        ("شماره تماس", "تلفن پشتیبانی", "شماره شرکت", "چطور تماس بگیرم", "تلفن شرکت"): 
+            "شماره تماس پشتیبانی فنی و فروش ما: **09130912580** می‌باشد. (پاسخگویی در ساعات کاری)",
+            
+        ("لینک فروشگاه", "از کجا بخرم", "خرید برد", "لیست قیمت", "قیمت"): 
+            "برای مشاهده محصولات، قیمت‌های به‌روز و ثبت سفارش، لطفاً به فروشگاه ما سر بزنید:\nhttps://bluewaverobotics.ir/shop",
+            
+        ("کانال تلگرام", "پیج اینستاگرام", "شبکه های اجتماعی", "ارتباط با ما"): 
+            "شما می‌توانید از طریق فرم تماس با ما در سایت و یا شماره 09130912580 با ما در ارتباط باشید."
+    }
+    
+    # بررسی می‌کنیم که آیا هیچ‌کدام از کلیدواژه‌ها در جمله کاربر وجود دارد یا خیر
+    for keywords, answer in local_faqs.items():
+        # اگر کاربر فقط نوشته باشد "سلام" یا جمله‌ای مثل "سلام شماره تماس چنده؟"
+        if any(keyword in query for keyword in keywords):
+            return f"**[⚡ پاسخ سریع سیستم]**\n\n{answer}"
+            
+    # اگر سوال پیچیده بود و در لیست بالا نبود، مقدار None برمی‌گرداند تا به سراغ هوش مصنوعی برود
+    return None
 
 def get_chatbot_response(user_query: str) -> str:
+    """
+    Handles user queries with local pre-filtering and an explicit Fallback mechanism.
+    """
+    # ==========================================
+    # پیش‌فیلتر محلی (آیا می‌توانیم بدون اینترنت جواب دهیم؟)
+    # ==========================================
+    fast_answer = check_local_fast_answers(user_query)
+    if fast_answer:
+        return fast_answer  # خروج فوری از تابع و ارسال جواب بدون مصرف هیچ توکنی
+
+    # ==========================================
+    # اگر جواب محلی پیدا نشد، حالا می‌رویم سراغ دیتابیس و API...
+    # ==========================================
+    # 1. Load the existing vector database
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-2")
     """
     Handles user queries with an explicit Fallback mechanism between Gemini and Groq
     to display which engine processed the request.
