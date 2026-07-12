@@ -72,32 +72,20 @@ def get_chatbot_response(user_query: str) -> str:
     Handles user queries with local pre-filtering and an explicit Fallback mechanism.
     """
     # ==========================================
-    # پیش‌فیلتر محلی (آیا می‌توانیم بدون اینترنت جواب دهیم؟)
+    # پیش‌فیلتر محلی
     # ==========================================
     fast_answer = check_local_fast_answers(user_query)
     if fast_answer:
-        return fast_answer  # خروج فوری از تابع و ارسال جواب بدون مصرف هیچ توکنی
+        return fast_answer  
 
     # ==========================================
-    # اگر جواب محلی پیدا نشد، حالا می‌رویم سراغ دیتابیس و API...
+    # بارگذاری دیتابیس و مدل‌ها
     # ==========================================
-    # 1. Load the existing vector database
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-2")
-    """
-    Handles user queries with an explicit Fallback mechanism between Gemini and Groq
-    to display which engine processed the request.
-    """
-    # 1. Load the existing vector database
+    # در این بخش اگر کلیدها یا دیتابیس مشکل داشته باشند، ارور رخ می‌دهد
     embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-2")
     vector_db = FAISS.load_local(FAISS_PATH, embeddings, allow_dangerous_deserialization=True)
     
-    # ==========================================
-    # Fallback AI System (Primary + Backup)
-    # ==========================================
-    # Primary Engine: Gemini
     primary_llm = ChatGoogleGenerativeAI(model="gemini-3.5-flash", temperature=0.1)
-    
-    # Backup Engine: Llama 3 (70B) on Groq's high-speed servers
     fallback_llm = ChatGroq(model="llama3-70b-8192", temperature=0.1)
 
     # ==========================================
@@ -105,24 +93,21 @@ def get_chatbot_response(user_query: str) -> str:
     # ==========================================
     expansion_prompt = f"""
     شما یک دستیار هوش مصنوعی هستید. سوال زیر را بررسی کنید.
-    اگر سوال شامل مقایسه دو محصول است (مثلا تفاوت X و Y)، آن را به دو عبارت جستجوی ساده تفکیک کنید و فقط با کاما (,) جدا کنید.
-    اگر سوال ساده است، فقط خود سوال را برگردانید. هیچ کلمه اضافه‌ای ننویسید.
+    اگر سوال شامل مقایسه دو محصول است، آن را به دو عبارت جستجوی ساده تفکیک کنید و با کاما جدا کنید.
+    اگر ساده است، فقط خود سوال را برگردانید.
     سوال: {user_query}
     """
     
     try:
-        # Try primary LLM (Gemini) for query expansion
         expanded_str = primary_llm.invoke(expansion_prompt).content
     except Exception as e:
         print(f"Gemini expansion failed: {e}")
         try:
-            # Fallback to Groq for query expansion
             expanded_str = fallback_llm.invoke(expansion_prompt).content
         except Exception as fallback_e:
             print(f"Groq expansion failed: {fallback_e}")
             expanded_str = user_query
 
-    # Clean and prepare the search queries
     search_queries = [q.strip() for q in expanded_str.split(',')]
     if user_query not in search_queries:
         search_queries.append(user_query)
@@ -136,13 +121,40 @@ def get_chatbot_response(user_query: str) -> str:
             docs = vector_db.similarity_search(q, k=2)
             retrieved_docs.extend(docs)
             
-        # Remove duplicates using a set
         unique_contents = list({doc.page_content for doc in retrieved_docs})
         formatted_context = "\n\n---\n\n".join(unique_contents)
     except Exception as e:
-        # Catch errors if Google Embeddings API limit is reached
         print(f"Vector search failed: {e}")
-        return "متاسفانه ترافیک سرور بسیار بالاست و ارتباط با پایگاه دانش موقتاً قطع شده است. لطفاً چند دقیقه دیگر امتحان کنید."
+        return "متاسفانه ارتباط با پایگاه دانش موقتاً قطع شده است."
+
+    # ==========================================
+    # STEP C: FINAL ANSWER GENERATION (CONSULTANT)
+    # ==========================================
+    system_prompt = (
+        "تو یک مشاور فنی ارشد و مهندس فروش در شرکت BlueWave Robotics هستی.\n"
+        "وظیفه تو پاسخ‌گویی دقیق بر اساس اطلاعات ارائه شده است.\n"
+        f"Context:\n{formatted_context}"
+    )
+
+    final_prompt = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        ("human", "{input}"),
+    ])
+
+    try:
+        chain = final_prompt | primary_llm | StrOutputParser()
+        response = chain.invoke({"input": user_query})
+        return f"**[🤖 Responded by: Gemini 3.5]**\n\n{response}"
+    except Exception as e:
+        print(f"Gemini failed, switching to Groq: {e}")
+        try:
+            chain = final_prompt | fallback_llm | StrOutputParser()
+            response = chain.invoke({"input": user_query})
+            return f"**[⚡ Responded by: Groq (Llama 3)]**\n\n{response}"
+        except Exception as fallback_e:
+            print(f"All LLMs failed: {fallback_e}")
+            return "سرورهای پردازش ابری در دسترس نیستند. پشتیبانی: 09130912580"
+        
 
     # ==========================================
     # STEP C: FINAL ANSWER GENERATION (CONSULTANT)
