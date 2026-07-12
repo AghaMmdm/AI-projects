@@ -86,8 +86,8 @@ def get_chatbot_response(user_query: str) -> str:
     vector_db = FAISS.load_local(FAISS_PATH, embeddings, allow_dangerous_deserialization=True)
     
     primary_llm = ChatGoogleGenerativeAI(model="gemini-3.5-flash", temperature=0.1)
-    fallback_llm = ChatGroq(model="llama3-70b-8192", temperature=0.1)
-
+    fallback_llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.1)
+    
     # ==========================================
     # STEP A: NATIVE QUERY EXPANSION
     # ==========================================
