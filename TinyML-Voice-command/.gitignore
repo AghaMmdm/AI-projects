@@ -1,9 +1,16 @@
-# Dataset and Extracted Features
+# --- Dataset and Extracted Features ---
+# حذف دیتای خام و پردازش شده از ردیابی گیت
 Data/*.wav
 Data/*.npy
 Data/speech_commands/
+Data/*.csv
 
-# Python Cache and Virtual Environments
+# --- Edge Deployment & Model Outputs ---
+# فایل‌های باینری و وزن‌های مدل که نباید در گیت باشند
+edge_mcu/*.bin
+edge_mcu/*.py
+
+# --- Python & Environment ---
 __pycache__/
 *.py[cod]
 *$py.class
@@ -11,9 +18,13 @@ venv/
 env/
 .env
 
-# Jupyter Notebook checkpoints
+# --- Jupyter Notebooks ---
 .ipynb_checkpoints/
 
-# OS generated files
+# --- OS generated files ---
 .DS_Store
 Thumbs.db
+
+# --- IDE/Editor Settings ---
+.vscode/
+.idea/

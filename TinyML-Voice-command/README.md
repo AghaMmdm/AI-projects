@@ -1,41 +1,49 @@
 # Ultra-Lightweight Edge AI: Voice Command Recognition (TinyML)
 
-An end-to-end Machine Learning pipeline for real-time Keyword Spotting (KWS), heavily optimized for microcontrollers with extreme resource constraints (e.g., < 100KB RAM). 
-
-This project tackles the classic TinyML bottleneck: fitting a robust audio classification model into a microcontroller without sacrificing accuracy. By replacing deep learning bloat with aggressive mathematical dimensionality reduction, the final inference model requires **less than 3KB of storage** and runs natively on MicroPython.
-
-## ✨ Key Features
-* **Extreme Compression:** Reduced the model footprint from >500KB (Standard Tree Ensembles) to <3KB using custom statistical pipelines.
-* **Smart Feature Engineering:** Replaced standard full-second MFCC averaging with **Dynamic Temporal Pooling** (extracting 39 features across the start, middle, and end of words) to preserve time-domain context.
-* **Mathematical Dimensionality Reduction:** Utilized Linear Discriminant Analysis (LDA) with an 'eigen' solver to compress 39 audio features into 3 highly discriminative super-features.
-* **Robust Target Focus:** Implemented Optuna for hyperparameter tuning with class-weight prioritization, ensuring high recall for critical commands (`on`, `off`, `stop`) while ignoring background noise (`unknown`).
-* **Zero-Dependency Inference:** The edge inference engine relies purely on standard Python loops and basic math. No heavy frameworks (like TensorFlow Lite or Scikit-Learn) are required on the board.
-
-## 🧠 System Architecture
-
-1. **VAD (Voice Activity Detection):** Silence trimming via energy thresholds.
-2. **MFCC Extraction:** Root reduction (extracting only the 13 most critical vocal frequencies).
-3. **Temporal Pooling:** Splitting the active voice wave into 3 equal sequences (3 × 13 = 39 Features).
-4. **LDA Transformation:** Mapping the 39 features into a 3-dimensional latent space.
-5. **Logistic Regression:** Making the final classification using a highly optimized weight matrix.
+An end-to-end Machine Learning pipeline for real-time Keyword Spotting (KWS), optimized for microcontrollers with extreme resource constraints (e.g., < 100KB RAM).
 
 ## 📂 Repository Structure
 
-```text
-├── Data/                       # Audio datasets (.wav) and extracted arrays (.npy)
-├── notebooks/                  
-│   ├── 01_model_experiments.ipynb  # Benchmarking Random Forest, XGBoost, Gaussian Naive Bayes
-│   └── 02_final_pipeline.ipynb     # The final highly-optimized LDA + LR pipeline
-├── edge_mcu/                   
-│   ├── model_data_lr.py            # Auto-generated weights and scalings matrix
-│   └── main.py                     # MicroPython inference engine and I2S Mic handling
-├── README.md                   
-└── requirements.txt
+The project is organized into a clear pipeline:
+* `/edge_data_collection`: Tools for recording and building your dataset on the hardware.
+* `/model_training`: Scripts for data augmentation, training, and model optimization.
+* `/edge_inference`: Production code to run directly on the microcontroller.
+* `/experiments`: Jupyter notebooks used for model research and benchmarking.
+
+## ✨ Key Features
+* **Extreme Compression:** Optimized model footprint (< 3KB) running natively on MicroPython.
+* **Smart Feature Engineering:** Dynamic Temporal Pooling (extracting 39 features across the start, middle, and end of words).
+* **Dimensionality Reduction:** Used LDA (Eigen solver) to compress 39 features into 3 highly discriminative super-features.
+* **Robust Performance:** Optuna-tuned hyperparameters with class-weight prioritization for critical commands.
+
+## 🚀 Getting Started
+
+### 1. Data Collection
+Run the script to collect audio samples on your board:
+```bash
+python edge_data_collection/01_record_dataset.py
+```
+
+### 2. Training
+Follow the pipeline to augment, train, and export your model:
+1. **Augmentation:** `python model_training/02_augment_data.py`
+2. **Training:** `python model_training/03_train_lda_lr.py`
+3. **Exploration:** View `experiments/models_comparison.ipynb` for benchmarking different architectures.
+
+### 3. Deployment
+Copy the generated parameters from `edge_mcu/model_data_lr.py` (or the `.bin` file) to your board. Ensure your `main.py` is loaded:
+```bash
+# Upload to your board using ampy or rshell
+ampy put edge_inference/main.py
 ```
 
 ## 🚀 Performance Benchmarks
-1. **Cross-Validation Accuracy:** ~78.6%
+* **Cross-Validation Accuracy:** ~78.6%
+* **Model Export Size:** ~2.5 KB
+* **Inference Time (MicroPython):** < 3ms
 
-2. **Model Export Size:** ~2.5 KB
-
-3. **Inference Time (MicroPython):** < 3ms
+## 🛠 Prerequisites
+Install the required environment:
+```bash
+pip install -r requirements.txt
+```
