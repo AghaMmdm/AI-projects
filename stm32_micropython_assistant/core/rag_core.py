@@ -8,8 +8,16 @@ MicroPython code for it (pin usage, peripherals, safety warnings, etc.).
 
 Design notes (read this before editing):
 - All knowledge base files live in ./data/*.md. Every .md file found there is
-  loaded automatically — no code change needed when you add a new file
-  (e.g. once data/company_info.md is filled in).
+  loaded automatically — no code change needed when you add a new file.
+  Currently: board_datasheet.md (pinout + electrical specs), company_info.md
+  (company/product info, no code), library_reference.md (the BlueLib API
+  surface — class names and methods, NOT full example programs), and
+  sensor_reference.md (per-sensor electrical facts: voltage tolerance,
+  protocol). See the project README for why library_reference.md and
+  sensor_reference.md exist as separate files from company_info.md — an
+  earlier version of this knowledge base accidentally dropped this content
+  while filtering out full code samples and links, which caused the model
+  to forget the BlueLib class API and hallucinate a wrong voltage warning.
 - Chunking is done by Markdown headers (## and ###), NOT by a fixed character
   count. This matters a lot for this project specifically: the pinout table
   in board_datasheet.md is one long Markdown table under a single "##"
@@ -61,15 +69,21 @@ SYSTEM_PROMPT_TEMPLATE = (
     "(مثل X1، Y9)، نه فقط نام پین میکروکنترلر (مثل PA0، PB10). همیشه در "
     "پاسخ و کدت از همون برچسب روی برد (X.../Y...) استفاده کن و نام پین "
     "میکروکنترلر رو در پرانتز بیار. مثال: Y9 (PB10).\n"
-    "۳. وقتی کاربر درخواست کد داد، همیشه کد MicroPython با ماژول machine "
-    "بنویس (مثل machine.Pin، machine.I2C، machine.SPI، machine.UART، "
-    "machine.PWM، machine.ADC)، نه کد C/HAL. کد رو همیشه داخل بلاک "
-    "```python``` برگردون.\n"
+    "۳. قانون طلایی کدنویسی: قبل از نوشتن هر کدی، همیشه اول چک کن که آیا "
+    "برای ماژول/سنسور درخواستی، یک کلاس اختصاصی در کتابخانه BlueLib (وارد "
+    "شده با نام mb) در Context معرفی شده یا نه. اگه بود، حتماً کد رو با "
+    "همون کلاس اختصاصی بنویس (مثلاً mb.BMotor، mb.BOled_Mbpy، mb.BRFID). "
+    "فقط وقتی هیچ کلاس اختصاصی‌ای در Context برای اون ماژول پیدا نشد، از "
+    "ماژول عمومی machine (مثل machine.Pin، machine.I2C) استفاده کن. کد رو "
+    "همیشه داخل بلاک ```python``` برگردون.\n"
     "۴. قبل از نوشتن کد برای یک پین، حتماً چک کن که آیا اون پین با پین‌های "
     "موتور (Motor1 تا Motor4) یا کاربرد دیگه‌ای تداخل داره یا نه. اگه تداخل "
     "داشت، صریح هشدار بده و یک پین جایگزین از Context پیشنهاد بده.\n"
     "۵. اگه سوال دربردارنده نکات ایمنی سخت‌افزاری بود (ولتاژ، جریان، تحمل "
-    "5V، BOOT0، تغذیه موتور)، همیشه هشدار مربوطه رو قبل از کد بیار، نه بعدش.\n"
+    "5V، BOOT0، تغذیه موتور)، همیشه هشدار مربوطه رو قبل از کد بیار، نه بعدش. "
+    "این هشدار باید دقیقاً بر اساس مشخصات همون قطعه‌ی خاص در Context باشه، "
+    "نه یک قانون کلی که از قطعه‌ی دیگه‌ای تعمیم دادی — مثلاً تحمل ولتاژ هر "
+    "سنسور می‌تونه با تحمل ولتاژ پین‌های خود میکروکنترلر فرق داشته باشه.\n"
     "۶. اگه سوال کاملاً خارج از حوزه این برد و MicroPython بود، محترمانه "
     "بگو که فقط در همین زمینه تخصص داری.\n\n"
     "Context:\n{context}"
@@ -189,11 +203,17 @@ def get_chatbot_response(user_query: str) -> dict:
             "is_fast_answer": False,
         }
 
-    # k=4: many hardware questions need more than one section at once
-    # (e.g. "which pins support I2C?" needs both the pinout table AND the
-    # I2C peripheral subsection to answer completely).
+    # k=6: many hardware questions need MULTIPLE sections at once — e.g.
+    # "write code for the RFID module" needs the pinout table (which pins
+    # are SPI), the library_reference.md entry (the BRFID class), AND the
+    # sensor_reference.md entry (voltage tolerance) all at the same time.
+    # Raising k from 4 to 6 was a direct fix for a real failure we saw:
+    # with k=4, some queries only retrieved hardware chunks and never
+    # reached the library/sensor reference chunks, causing the model to
+    # either fall back to generic `machine` code or hallucinate safety
+    # warnings not supported by the actual sensor's spec.
     try:
-        retrieved_docs = vector_db.similarity_search(user_query, k=4)
+        retrieved_docs = vector_db.similarity_search(user_query, k=6)
         formatted_context = "\n\n---\n\n".join(doc.page_content for doc in retrieved_docs)
     except Exception as e:
         print(f"Vector search failed: {e}")

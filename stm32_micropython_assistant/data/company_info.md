@@ -1,12 +1,3 @@
-<!--
-This file is a placeholder for company and product information.
-It is NOT filled in yet — the assistant currently only knows the board's
-datasheet (board_datasheet.md). Fill in the sections below, in Persian
-(since that's the answer language for end users), following the same
-"## / ###" heading structure so each section becomes one clean RAG chunk.
-
-Suggested sections to add:
-
 ## معرفی و هویت شرکت
 شرکت گسترش فناوری سامانه‌های رباتیک پارسیان با برند تجاری بلو ویو رباتیکس (Blue Wave Robotics) در سال ۱۴۰۲ در شهر اصفهان تأسیس شده است. مؤسس این شرکت مهندس سیدپدرام محسنی است. این مجموعه یک شرکت پیشرو در زمینه توسعه زیرساخت‌های فناوری، هوشمندسازی و سیستم‌های رباتیک است که در دو بخش تولید راهکارهای صنعتی (اتوماسیون پیشرفته) و توسعه اکوسیستم‌های سخت‌افزاری و نرم‌افزاری آموزشی فعالیت می‌کند. پروژه‌های سازمانی این شرکت شامل توسعه زیرساخت‌های شهر هوشمند، اتوماسیون صنعتی و اینترنت اشیا، پردازش تصویر و طراحی سخت‌افزارهای اختصاصی است.
 
@@ -52,8 +43,3 @@ Suggested sections to add:
 ## تماس و پشتیبانی
 * **شماره تماس پشتیبانی:** 09130912580
 * **کانال‌های ارتباطی:** مشتریان می‌توانند برای دریافت مشاوره، خرید قطعات و ثبت درخواست خدمات تخصصی سازمانی، علاوه بر تماس تلفنی، از طریق فرم تماس در سایت رسمی فروشگاه بلو ویو رباتیکس اقدام نمایند.
-
-Once this file has real content, re-run scripts/build_vector_db.py to
-rebuild the vector index — it automatically picks up every .md file in
-this folder, so you don't need to change any code.
--->
