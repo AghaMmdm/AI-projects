@@ -379,9 +379,24 @@ function add_custom_ai_chat_widget() {
     </div>
 
     <script>
-      document.addEventListener("DOMContentLoaded", function() {
-        // Variables Definition
+      (function initBlueWaveChat() {
+        // ۱. جلوگیری از اجرای تکراری در صورت لود AJAX هدر/فوتر توسط قالب وودمارت
+        if (window.blueWaveChatInitialized) return;
+
         const chatWidget = document.getElementById('ai-chat-widget');
+        
+        // ۲. سیستم Fallback: اگر المان هنوز رندر نشده بود، نیم ثانیه بعد دوباره تلاش کن
+        if (!chatWidget) {
+            window.bwChatAttempts = (window.bwChatAttempts || 0) + 1;
+            if (window.bwChatAttempts < 10) {
+                setTimeout(initBlueWaveChat, 500);
+            }
+            return;
+        }
+
+        window.blueWaveChatInitialized = true;
+
+        // Variables Definition
         const chatWindow = document.getElementById('ai-chat-window');
         const chatBtn = document.getElementById('ai-chat-button');
         const closeBtn = document.getElementById('ai-chat-close');
@@ -446,7 +461,6 @@ function add_custom_ai_chat_widget() {
             const msgDiv = document.createElement('div');
             msgDiv.className = sender === 'bot' ? 'chat-msg msg-bot' : 'chat-msg msg-user';
             
-            // Using innerHTML to render HTML buttons from server
             msgDiv.innerHTML = message;
             
             wrapper.appendChild(msgDiv);
@@ -475,15 +489,13 @@ function add_custom_ai_chat_widget() {
                 statusText.innerHTML = '<span class="status-dot"></span> Online';
                 statusText.classList.remove('status-typing');
 
-                // حالت اول: سرور ارور داده (مثل تمام شدن توکن یا خطای 500 در پایتون)
                 if (!response.ok) {
                     appendMessage('متاسفانه در حال حاضر سرویس هوش مصنوعی به دلیل ترافیک بالا یا محدودیت سرور در دسترس نیست. لطفاً دقایقی دیگر مجدداً تلاش کنید.', 'bot');
-                    return; // توقف اجرای بقیه کد
+                    return; 
                 }
 
                 const data = await response.json();
 
-                // حالت دوم: سرور وصل شده ولی پاسخ خالی یا نامعتبر داده است
                 if(data.reply) {
                    appendMessage(data.reply, 'bot');
                 } else {
@@ -491,7 +503,6 @@ function add_custom_ai_chat_widget() {
                 }
 
             } catch (error) {
-                // حالت سوم: کلا اینترنت کاربر قطع است یا سرور خاموش شده (ارور شبکه)
                 console.error("API Error:", error);
                 statusText.innerHTML = '<span class="status-dot"></span> Online';
                 statusText.classList.remove('status-typing');
@@ -502,7 +513,8 @@ function add_custom_ai_chat_widget() {
         // Event Listeners for sending
         sendBtn.addEventListener('click', sendMessage);
         inputField.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
-      });
+        
+      })(); // اجرای فوری تابع (IIFE)
     </script>
     <?php
 }
