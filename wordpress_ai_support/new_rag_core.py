@@ -67,8 +67,8 @@ def get_chatbot_response(user_query: str) -> str:
         vector_db = FAISS.load_local(FAISS_PATH, embeddings, allow_dangerous_deserialization=True)
         
         # Initialize primary and fallback LLMs
-        primary_llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.1)
-        fallback_llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.1)
+        primary_llm = ChatGoogleGenerativeAI(model="gemini-3.5-flash", temperature=0.1)
+        fallback_llm = ChatGroq(model="qwen/qwen3.8-27b", temperature=0.1)
     except Exception as e:
         return "متاسفانه در راه‌اندازی سیستم خطایی رخ داده است."
 
